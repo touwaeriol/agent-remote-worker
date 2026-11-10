@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
-import { PERMISSION_MODES } from "../shared/protocol.ts";
+import { APPROVAL_MODES, PERMISSION_MODES } from "../shared/protocol.ts";
 import { ToolError } from "../shared/tooling.ts";
 
 const workerSchema = z.object({
@@ -24,6 +24,13 @@ const workerSchema = z.object({
    * answering Claude Code's trust prompt there. Off unless you turn it on.
    */
   trustWorkRoot: z.boolean().default(false),
+  /**
+   * Who answers the worker's permission prompts and questions: the master
+   * session on its own judgement, or always the user (through the master).
+   */
+  approval: z.enum(APPROVAL_MODES).default("master"),
+  /** Seconds a worker session waits for that answer before it is treated as a refusal. */
+  approvalTimeout: z.number().int().min(30).max(3600).default(600),
 });
 
 const configSchema = z.object({

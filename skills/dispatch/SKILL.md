@@ -1,6 +1,6 @@
 ---
 name: dispatch
-description: 把任务派给远程 worker（另一台机器、另一个账号上的 Claude Code 会话）时使用：何时派发、派发前要做什么、怎么写任务说明、怎么回答 worker 的提问、怎么审查和收尾。用户说“派给 worker”“让 worker 做”“用另一个账号跑”时加载。
+description: 把任务派给远程 worker（另一台机器、另一个账号上的 Claude Code 会话）时使用：何时派发、派发前要做什么、怎么写任务说明、怎么答复 worker 的权限请求和提问、怎么审查和收尾。用户说“派给 worker”“让 worker 做”“用另一个账号跑”时加载。
 ---
 
 # 把任务派给远程 worker
@@ -47,14 +47,22 @@ worker 是另一台机器上、用另一个账号登录的 Claude Code 后台会
 - **要立刻停下**用 `worker_stop`，之后可以用 `worker_resume` 续跑。
 - 把 worker 的重要汇报转述给用户，不要只说“worker 完成了”。
 
-## 回答 worker 的提问
+## 答复 worker 的权限请求和提问
 
-worker 提问后会停下等你。按问题的性质处理：
+worker 需要确认某个操作，或用 `AskUserQuestion` 提问时，你会收到一条带编号的消息：`… 的权限请求 #编号` 或 `… 的提问 #编号`。worker 在原地等待，超时（默认 10 分钟）后权限请求按拒绝处理，所以要尽快答复。用 `worker_answer` 按编号答复：
 
-- **你能定的**：任务范围内的技术选择、用户已经表过态的事。直接用 `worker_send` 回复。
-- **要问用户的**：需求取舍、有风险或不可逆的操作、超出原任务范围的事。先问用户，拿到答复再转给 worker。
+- **权限请求**：`decision="allow"` 放行，`decision="deny"` 拒绝并在 `message` 里说明理由或替代做法。同类操作还会反复出现时，放行时加 `remember=true`，本会话内不再询问。
+- **提问**：`answers` 按问题顺序每个问题给一个答案，可以是选项标签，也可以是自由文本。
 
-worker 汇报某个操作被权限设置拒绝时，由你判断：能换一种不需要该权限的做法，就告诉它怎么换；确实需要放开权限，就告诉用户是哪个操作、为什么需要，用户同意后用 `worker_stop` 和带 `permission_mode` 的 `worker_resume` 续跑。不要替 worker 在本机执行那个被拒绝的操作。
+由谁决定，按性质分：
+
+- **你能定的**：任务范围内的技术选择、只读或可撤销的操作（读文件、跑测试、构建、在 worktree 里改代码、推送到约定分支）、用户已经表过态的事。直接答复。
+- **要问用户的**：需求取舍、删除或覆盖任务范围外的数据、推送到非约定分支或强制推送、部署、改动生产或外部服务、安装全局依赖、超出原任务范围的事。先问用户，再答复。拿不准就问。
+- 节点配置为 `approval: "user"` 时，每个请求都要先问用户，答复时带 `user_confirmed=true`。
+
+不要替 worker 在本机执行那个被请求的操作。担心漏了请求时用 `worker_pending` 查看。
+
+worker 用 `ask_master` 发来的开放式问题（消息里没有编号）不会原地等待，用 `worker_send` 回复。
 
 ## 审查和收尾
 
@@ -69,5 +77,5 @@ worker 汇报完成后：
 ## 出问题时
 
 - **工具说 workRoot 未被信任**：告诉用户两种办法，由用户选：在 worker 上进入节点配置的 `workRoot` 运行一次 `claude` 并接受信任提示；或在 `~/.claude/workers.json` 里给该节点加 `"trustWorkRoot": true`，让插件自动信任。不要自己去改这个配置。
-- **会话状态是“卡在权限确认”**：告诉用户，可以用 `worker_stop` 后以别的 `permission_mode` 执行 `worker_resume`。
+- **会话状态是“卡在权限确认”**：先用 `worker_pending` 查看是否有请求在等你答复。没有的话，告诉用户可以用 `worker_stop` 后以别的 `permission_mode` 执行 `worker_resume`。
 - **长时间没有消息**：用 `worker_status` 看状态，再用 `worker_send` 问进度。

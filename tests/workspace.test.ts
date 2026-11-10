@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, test } from "node:test";
 import { inspectProject, syncProblems } from "../src/master/project.ts";
 import { taskBrief } from "../src/shared/protocol.ts";
-import { formatQuestions } from "../src/worker/cli.ts";
+import { formatQuestions } from "../src/shared/protocol.ts";
 import { prepareWorkspace, projectName, removeWorkspace, workspacePaths } from "../src/worker/workspace.ts";
 
 const git = (cwd: string, ...args: string[]) =>
