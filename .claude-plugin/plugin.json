@@ -1,0 +1,10 @@
+{
+  "name": "remote-workers",
+  "version": "0.1.0",
+  "description": "把任务派给其他机器上的 Claude Code 会话（另一个账号的额度），通过 SSH 和 Git 协作，双向实时通信。",
+  "author": {
+    "name": "touwaeriol"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/touwaeriol/agent-remote-worker"
+}

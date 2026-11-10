@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "workers": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/master.js"]
+    }
+  }
+}
