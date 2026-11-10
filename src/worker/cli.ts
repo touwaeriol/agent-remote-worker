@@ -164,7 +164,7 @@ export function questionOutput(request: PendingRequest, answer: RequestAnswer | 
 async function hookRequest(kind: "permission" | "question", args: string[]): Promise<number> {
   const [socket = "", worker = "worker", session = "?", timeoutArg, approvalArg] = args;
   const input = JSON.parse(await readStdin());
-  const timeoutMs = (Number(timeoutArg) || 600) * 1000;
+  const timeoutMs = Math.max(0, Number(timeoutArg) || 0) * 1000; // 0: wait until answered
   const dir = requestsDir();
   const request: PendingRequest = {
     id: newRequestId(),
@@ -173,7 +173,7 @@ async function hookRequest(kind: "permission" | "question", args: string[]): Pro
     session,
     pid: process.pid,
     createdAt: Date.now(),
-    deadline: Date.now() + timeoutMs,
+    deadline: timeoutMs ? Date.now() + timeoutMs : 0,
     approval: approvalArg === "user" ? "user" : "master",
     toolName: String(input.tool_name ?? (kind === "question" ? "AskUserQuestion" : "?")),
     toolInput: (input.tool_input ?? {}) as Record<string, unknown>,

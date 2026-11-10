@@ -7352,18 +7352,18 @@ function describeToolCall(toolName, input) {
 }
 function requestMessage(request) {
   const { worker, session, id } = request;
-  const minutes = Math.max(1, Math.round((request.deadline - Date.now()) / 6e4));
+  const minutes = request.deadline ? Math.max(1, Math.round((request.deadline - Date.now()) / 6e4)) : 0;
   const who = request.approval === "user" ? "\u8FD9\u4E2A\u8282\u70B9\u8981\u6C42\u6BCF\u4E2A\u8BF7\u6C42\u90FD\u5148\u95EE\u7528\u6237\uFF0C\u62FF\u5230\u7528\u6237\u7684\u7B54\u590D\u540E\u518D" : "\u4F60\u53EF\u4EE5\u81EA\u5DF1\u51B3\u5B9A\uFF0C\u4E5F\u53EF\u4EE5\u5148\u95EE\u7528\u6237\uFF0C\u7136\u540E";
   if (request.kind === "permission") {
     return `${WORKER_PREFIX} worker\u300C${worker}\u300D\u4F1A\u8BDD\u300C${session}\u300D\u7684\u6743\u9650\u8BF7\u6C42 #${id}\uFF0C\u5B83\u5728\u539F\u5730\u7B49\u5F85\u7B54\u590D\uFF1A
 ${describeToolCall(request.toolName, request.toolInput)}
 
-\uFF08${who}\u7B54\u590D\uFF1Aworker_answer(worker="${worker}", request_id="${id}", decision="allow" \u6216 "deny", message=\u62D2\u7EDD\u65F6\u7684\u8BF4\u660E)\u3002\u7EA6 ${minutes} \u5206\u949F\u5185\u6CA1\u6709\u7B54\u590D\u4F1A\u6309\u62D2\u7EDD\u5904\u7406\u3002\uFF09`;
+\uFF08${who}\u7B54\u590D\uFF1Aworker_answer(worker="${worker}", request_id="${id}", decision="allow" \u6216 "deny", message=\u62D2\u7EDD\u65F6\u7684\u8BF4\u660E)\u3002` + (minutes ? `\u7EA6 ${minutes} \u5206\u949F\u5185\u6CA1\u6709\u7B54\u590D\u4F1A\u6309\u62D2\u7EDD\u5904\u7406\u3002\uFF09` : "\u5B83\u4F1A\u4E00\u76F4\u7B49\u5230\u4F60\u7B54\u590D\u3002\uFF09");
   }
   return `${WORKER_PREFIX} worker\u300C${worker}\u300D\u4F1A\u8BDD\u300C${session}\u300D\u7684\u63D0\u95EE #${id}\uFF0C\u5B83\u5728\u539F\u5730\u7B49\u5F85\u7B54\u590D\uFF1A
 ${formatQuestions(request.toolInput)}
 
-\uFF08${who}\u7B54\u590D\uFF1Aworker_answer(worker="${worker}", request_id="${id}", answers=[\u6309\u95EE\u9898\u987A\u5E8F\uFF0C\u6BCF\u4E2A\u95EE\u9898\u4E00\u4E2A\u7B54\u6848\uFF0C\u53EF\u4EE5\u662F\u9009\u9879\u6807\u7B7E\u6216\u81EA\u7531\u6587\u672C\uFF1B\u591A\u9009\u7528\u9017\u53F7\u5206\u9694])\u3002\u7EA6 ${minutes} \u5206\u949F\u5185\u6CA1\u6709\u7B54\u590D\uFF0Cworker \u4F1A\u7ED3\u675F\u8FD9\u4E00\u8F6E\uFF0C\u4E4B\u540E\u53EA\u80FD\u7528 worker_send \u56DE\u590D\u3002\uFF09`;
+\uFF08${who}\u7B54\u590D\uFF1Aworker_answer(worker="${worker}", request_id="${id}", answers=[\u6309\u95EE\u9898\u987A\u5E8F\uFF0C\u6BCF\u4E2A\u95EE\u9898\u4E00\u4E2A\u7B54\u6848\uFF0C\u53EF\u4EE5\u662F\u9009\u9879\u6807\u7B7E\u6216\u81EA\u7531\u6587\u672C\uFF1B\u591A\u9009\u7528\u9017\u53F7\u5206\u9694])\u3002` + (minutes ? `\u7EA6 ${minutes} \u5206\u949F\u5185\u6CA1\u6709\u7B54\u590D\uFF0Cworker \u4F1A\u7ED3\u675F\u8FD9\u4E00\u8F6E\uFF0C\u4E4B\u540E\u53EA\u80FD\u7528 worker_send \u56DE\u590D\u3002\uFF09` : "\u5B83\u4F1A\u4E00\u76F4\u7B49\u5230\u4F60\u7B54\u590D\u3002\uFF09");
 }
 function rememberable(suggestions) {
   return (suggestions ?? []).filter(
@@ -7425,7 +7425,7 @@ function readPending(dir, id) {
   } catch {
     return void 0;
   }
-  if (!isAlive(request.pid) || request.deadline < Date.now()) {
+  if (!isAlive(request.pid) || request.deadline && request.deadline < Date.now()) {
     removeRequest(dir, id);
     return void 0;
   }
@@ -7460,8 +7460,9 @@ async function waitForAnswer(dir, request, intervalMs = 500) {
       return JSON.parse(fs2.readFileSync(file, "utf8"));
     } catch {
     }
-    if (Date.now() >= request.deadline) return void 0;
-    await new Promise((resolve) => setTimeout(resolve, Math.min(intervalMs, Math.max(0, request.deadline - Date.now()))));
+    if (request.deadline && Date.now() >= request.deadline) return void 0;
+    const left = request.deadline ? Math.max(0, request.deadline - Date.now()) : intervalMs;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(intervalMs, left)));
   }
 }
 
@@ -7732,7 +7733,7 @@ function questionOutput(request, answer2, fallback) {
 async function hookRequest(kind, args2) {
   const [socket = "", worker = "worker", session = "?", timeoutArg, approvalArg] = args2;
   const input = JSON.parse(await readStdin());
-  const timeoutMs = (Number(timeoutArg) || 600) * 1e3;
+  const timeoutMs = Math.max(0, Number(timeoutArg) || 0) * 1e3;
   const dir = requestsDir();
   const request = {
     id: newRequestId(),
@@ -7741,7 +7742,7 @@ async function hookRequest(kind, args2) {
     session,
     pid: process.pid,
     createdAt: Date.now(),
-    deadline: Date.now() + timeoutMs,
+    deadline: timeoutMs ? Date.now() + timeoutMs : 0,
     approval: approvalArg === "user" ? "user" : "master",
     toolName: String(input.tool_name ?? (kind === "question" ? "AskUserQuestion" : "?")),
     toolInput: input.tool_input ?? {},

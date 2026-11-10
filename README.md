@@ -66,7 +66,7 @@ Claude Code 插件 `agent-remote-worker`。
    | `nodePath` | worker 上 `node` 的路径。默认在 `claude` 所在目录和 `PATH` 里找 |
    | `permissionMode` | 该节点的默认权限模式：`auto`、`default`、`bypassPermissions`、`dontAsk`、`acceptEdits` |
    | `approval` | worker 的权限请求和提问由谁答复：`master`（默认，主节点可自行决定，也可以问你）或 `user`（每个请求都必须先问你） |
-   | `approvalTimeout` | worker 等待答复的秒数，默认 600，范围 30～3600。超时后权限请求按拒绝处理 |
+   | `approvalTimeout` | worker 等待答复的秒数。默认 0，表示不限时，一直等到答复；设为正数时，超时后权限请求按拒绝处理 |
    | `minRemainingPercent` | worker 本周额度剩余低于这个百分比时拒绝派发，默认 10 |
    | `localClaudePath` | 本机 `claude` 的路径，查本机额度时用。默认自动找 |
 
@@ -102,7 +102,7 @@ worker 会话旁边没有人，所以它的权限确认和内置提问（`AskUse
 
 只有 Claude Code 本来要弹确认的操作才会发给主节点。已被允许规则或当前权限模式放行的操作照常执行，不会打扰主节点。
 
-- **超时**：超过 `approvalTimeout` 没有答复，权限请求按拒绝处理；提问则让 worker 结束这一轮，之后只能用 `worker_send` 回复。
+- **超时**：默认不限时，worker 一直等到答复。设置了 `approvalTimeout` 时，超时没有答复的权限请求按拒绝处理；提问则让 worker 结束这一轮，之后只能用 `worker_send` 回复。
 - **主节点不在线**：钩子立即返回。权限请求按拒绝处理，提问让 worker 自行决定并在汇报里说明。
 - **通道恢复后**：主节点会把仍在等待的请求重新推送一遍，`worker_list` 也会显示每个节点有几个请求在等。
 - **节点配置 `approval: "user"`**：`worker_answer` 必须带 `user_confirmed=true`，也就是主节点必须先问过你。

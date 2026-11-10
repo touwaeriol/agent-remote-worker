@@ -16,7 +16,7 @@ import {
 import { ToolError } from "../shared/tooling.ts";
 import type { PrepResult } from "../worker/cli.ts";
 import type { RemoveRequest, Workspace, WorkspaceRequest } from "../worker/workspace.ts";
-import type { WorkerConfig } from "./config.ts";
+import { HOOK_TIMEOUT_MAX, type WorkerConfig } from "./config.ts";
 import { SshHost, shPath, shq } from "./exec.ts";
 import { USAGE_ARGS, parseUsage, type Usage } from "./usage.ts";
 
@@ -216,7 +216,8 @@ export class WorkerNode {
         .map(shq)
         .join(" "),
       // The hook waits for the master's answer; Claude Code must not give up on it first.
-      timeout: approvalTimeout + 60,
+      // With no limit set, give it the longest timeout a timer can hold.
+      timeout: approvalTimeout ? approvalTimeout + 60 : HOOK_TIMEOUT_MAX,
     });
     const settings = {
       // Nobody sits at a worker session: its permission prompts and questions go to the master instead.

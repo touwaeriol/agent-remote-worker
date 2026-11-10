@@ -88,6 +88,7 @@ export interface PendingRequest {
   /** The hook process holding the session; the request is void once it is gone. */
   pid: number;
   createdAt: number;
+  /** When the hook gives up waiting; 0 means it waits until answered. */
   deadline: number;
   approval: ApprovalMode;
   toolName: string;
@@ -143,21 +144,21 @@ export function describeToolCall(toolName: string, input: Record<string, unknown
 /** A pending request as the master session reads it, with how to answer it. */
 export function requestMessage(request: PendingRequest): string {
   const { worker, session, id } = request;
-  const minutes = Math.max(1, Math.round((request.deadline - Date.now()) / 60_000));
+  const minutes = request.deadline ? Math.max(1, Math.round((request.deadline - Date.now()) / 60_000)) : 0;
   const who = request.approval === "user" ? "这个节点要求每个请求都先问用户，拿到用户的答复后再" : "你可以自己决定，也可以先问用户，然后";
   if (request.kind === "permission") {
     return (
       `${WORKER_PREFIX} worker「${worker}」会话「${session}」的权限请求 #${id}，它在原地等待答复：\n` +
       `${describeToolCall(request.toolName, request.toolInput)}\n\n` +
       `（${who}答复：worker_answer(worker="${worker}", request_id="${id}", decision="allow" 或 "deny", message=拒绝时的说明)。` +
-      `约 ${minutes} 分钟内没有答复会按拒绝处理。）`
+      (minutes ? `约 ${minutes} 分钟内没有答复会按拒绝处理。）` : "它会一直等到你答复。）")
     );
   }
   return (
     `${WORKER_PREFIX} worker「${worker}」会话「${session}」的提问 #${id}，它在原地等待答复：\n` +
     `${formatQuestions(request.toolInput)}\n\n` +
     `（${who}答复：worker_answer(worker="${worker}", request_id="${id}", answers=[按问题顺序，每个问题一个答案，可以是选项标签或自由文本；多选用逗号分隔])。` +
-    `约 ${minutes} 分钟内没有答复，worker 会结束这一轮，之后只能用 worker_send 回复。）`
+    (minutes ? `约 ${minutes} 分钟内没有答复，worker 会结束这一轮，之后只能用 worker_send 回复。）` : "它会一直等到你答复。）")
   );
 }
 

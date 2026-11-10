@@ -49,7 +49,7 @@ worker 是另一台机器上、用另一个账号登录的 Claude Code 后台会
 
 ## 答复 worker 的权限请求和提问
 
-worker 需要确认某个操作，或用 `AskUserQuestion` 提问时，你会收到一条带编号的消息：`… 的权限请求 #编号` 或 `… 的提问 #编号`。worker 在原地等待，超时（默认 10 分钟）后权限请求按拒绝处理，所以要尽快答复。用 `worker_answer` 按编号答复：
+worker 需要确认某个操作，或用 `AskUserQuestion` 提问时，你会收到一条带编号的消息：`… 的权限请求 #编号` 或 `… 的提问 #编号`。worker 在原地等待，默认一直等到你答复，期间它什么也做不了，所以要尽快答复（节点配置了 `approvalTimeout` 时，超时后权限请求按拒绝处理）。用 `worker_answer` 按编号答复：
 
 - **权限请求**：`decision="allow"` 放行，`decision="deny"` 拒绝并在 `message` 里说明理由或替代做法。同类操作还会反复出现时，放行时加 `remember=true`，本会话内不再询问。
 - **提问**：`answers` 按问题顺序每个问题给一个答案，可以是选项标签，也可以是自由文本。

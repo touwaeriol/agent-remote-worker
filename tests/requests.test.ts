@@ -37,6 +37,8 @@ test("a permission request tells the master what is asked and how to answer", ()
   assert.match(text, /命令：rm -rf dist\n说明：清理构建产物/);
   assert.match(text, /worker_answer\(worker="box", request_id="abcd1234", decision=/);
   assert.match(requestMessage(request({ approval: "user" })), /先问用户/);
+  assert.match(text, /约 1 分钟内没有答复会按拒绝处理/);
+  assert.match(requestMessage(request({ deadline: 0 })), /它会一直等到你答复/);
   assert.match(describeToolCall("Edit", { file_path: "/a" }), /工具：Edit\n参数：.*file_path/s);
 });
 
@@ -100,6 +102,13 @@ test("requests can be listed and answered once, and vanish with their hook", asy
   assert.throws(() => answerRequest(dir, "abcd1234", { kind: "permission", decision: "deny" }), /已经答复过/);
   assert.deepEqual(await waitForAnswer(dir, request()), { kind: "permission", decision: "allow" });
   assert.equal(await waitForAnswer(dir, request({ id: "beef0000", deadline: Date.now() + 50 }), 10), undefined);
+
+  // no deadline: stays pending and keeps waiting until answered
+  savePending(dir, request({ id: "f0f0f0f0", deadline: 0 }));
+  assert.ok(listPending(dir).some((r) => r.id === "f0f0f0f0"));
+  const waiting = waitForAnswer(dir, request({ id: "f0f0f0f0", deadline: 0 }), 10);
+  setTimeout(() => answerRequest(dir, "f0f0f0f0", { kind: "permission", decision: "deny" }), 100);
+  assert.deepEqual(await waiting, { kind: "permission", decision: "deny" });
 });
 
 /** A stand-in for the master session's inbox that collects what arrives. */

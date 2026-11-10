@@ -59,7 +59,7 @@ function readPending(dir: string, id: string): PendingRequest | undefined {
     return undefined;
   }
   // The hook gave up or was killed: nobody is waiting for an answer any more.
-  if (!isAlive(request.pid) || request.deadline < Date.now()) {
+  if (!isAlive(request.pid) || (request.deadline && request.deadline < Date.now())) {
     removeRequest(dir, id);
     return undefined;
   }
@@ -99,7 +99,7 @@ export function answerRequest(dir: string, id: string, answer: RequestAnswer): P
   return request;
 }
 
-/** Waits for the master's answer until the request's deadline; undefined when none came. */
+/** Waits for the master's answer until the request's deadline (forever when it has none); undefined when none came. */
 export async function waitForAnswer(dir: string, request: PendingRequest, intervalMs = 500): Promise<RequestAnswer | undefined> {
   const file = answerFile(dir, request.id);
   for (;;) {
@@ -108,7 +108,8 @@ export async function waitForAnswer(dir: string, request: PendingRequest, interv
     } catch {
       // not answered yet (or caught mid-rename: try again)
     }
-    if (Date.now() >= request.deadline) return undefined;
-    await new Promise((resolve) => setTimeout(resolve, Math.min(intervalMs, Math.max(0, request.deadline - Date.now()))));
+    if (request.deadline && Date.now() >= request.deadline) return undefined;
+    const left = request.deadline ? Math.max(0, request.deadline - Date.now()) : intervalMs;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(intervalMs, left)));
   }
 }

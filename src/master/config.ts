@@ -4,6 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { APPROVAL_MODES, PERMISSION_MODES } from "../shared/protocol.ts";
+
+/** The longest hook timeout, in seconds, that still fits a JavaScript timer (about 24 days). */
+export const HOOK_TIMEOUT_MAX = Math.floor(0x7fffffff / 1000);
 import { ToolError } from "../shared/tooling.ts";
 
 const workerSchema = z.object({
@@ -29,8 +32,11 @@ const workerSchema = z.object({
    * session on its own judgement, or always the user (through the master).
    */
   approval: z.enum(APPROVAL_MODES).default("master"),
-  /** Seconds a worker session waits for that answer before it is treated as a refusal. */
-  approvalTimeout: z.number().int().min(30).max(3600).default(600),
+  /**
+   * Seconds a worker session waits for that answer before it is treated as a
+   * refusal. 0, the default, waits until the answer comes.
+   */
+  approvalTimeout: z.number().int().min(0).max(HOOK_TIMEOUT_MAX - 60).default(0),
 });
 
 const configSchema = z.object({

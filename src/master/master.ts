@@ -506,7 +506,7 @@ export class Master {
     }
     rows.push(`权限模式默认值：${node.config.permissionMode}`);
     rows.push(
-      `权限请求和提问：${node.config.approval === "user" ? "必须问用户" : "主节点可自行决定"}，等待上限 ${node.config.approvalTimeout} 秒`,
+      `权限请求和提问：${node.config.approval === "user" ? "必须问用户" : "主节点可自行决定"}，${node.config.approvalTimeout ? `等待上限 ${node.config.approvalTimeout} 秒` : "一直等到答复"}`,
     );
     return `节点「${node.name}」自检：\n${rows.join("\n")}`;
   }
