@@ -119,6 +119,14 @@ export class Master {
       ].join("\n");
     }
 
+    if ((await node.ensureWorkRootTrusted()) === "untrusted") {
+      throw new ToolError(
+        `没有派发：worker「${node.name}」上的 workRoot（${node.config.workRoot}）还没有被 Claude Code 信任，后台会话无法在里面启动。\n` +
+          "两种解决办法：在 worker 上进入该目录运行一次 claude 并接受信任提示；" +
+          "或在节点配置里给这个节点加 \"trustWorkRoot\": true，让插件自动信任它。",
+      );
+    }
+
     // Cloning can take minutes: do it in the background and tell the session when it is done.
     const job: Preparation = { worker: node.name, phase: "正在 worker 上克隆或更新项目", startedAt: Date.now() };
     this.preparing.set(name, job);
@@ -410,8 +418,18 @@ export class Master {
         if (!inbox) throw new ToolError("找不到，worker 的消息将无法送达");
         return inbox;
       });
+      const root = node.config.workRoot;
+      await step("workRoot 信任", async () => {
+        const state = await node.ensureWorkRootTrusted();
+        if (state === "untrusted") {
+          throw new ToolError(
+            `${root} 未被信任：请在 worker 上进入该目录运行一次 claude 并接受信任提示，或在节点配置里设置 "trustWorkRoot": true`,
+          );
+        }
+        return state === "just-trusted" ? `${root} 已自动信任（trustWorkRoot 已开启）` : `${root} 已信任`;
+      });
       const cwd = args.cwd;
-      if (cwd) {
+      if (cwd && cwd !== root) {
         await step("目录信任", async () => {
           if (await node.isTrusted(cwd)) return `${cwd} 已信任`;
           throw new ToolError(`${cwd} 未被信任：请在 worker 上进入该目录运行一次 claude 并接受信任提示`);

@@ -19,6 +19,11 @@ const workerSchema = z.object({
    * once; the worktrees created inside it are then trusted too.
    */
   workRoot: z.string().min(1).default("~/agent-remote-worker"),
+  /**
+   * Let the plugin mark `workRoot` as trusted on the worker instead of you
+   * answering Claude Code's trust prompt there. Off unless you turn it on.
+   */
+  trustWorkRoot: z.boolean().default(false),
 });
 
 const configSchema = z.object({

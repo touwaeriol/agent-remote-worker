@@ -21791,7 +21791,12 @@ var workerSchema = external_exports.object({
    * Where projects are cloned on the worker. Trust this folder in Claude Code
    * once; the worktrees created inside it are then trusted too.
    */
-  workRoot: external_exports.string().min(1).default("~/agent-remote-worker")
+  workRoot: external_exports.string().min(1).default("~/agent-remote-worker"),
+  /**
+   * Let the plugin mark `workRoot` as trusted on the worker instead of you
+   * answering Claude Code's trust prompt there. Off unless you turn it on.
+   */
+  trustWorkRoot: external_exports.boolean().default(false)
 });
 var configSchema = external_exports.object({
   workers: external_exports.record(workerSchema).refine((workers) => Object.keys(workers).length > 0, {
@@ -22043,6 +22048,7 @@ var WorkerNode = class {
   config;
   ssh;
   scriptCurrent = false;
+  workRootTrusted = false;
   constructor(name, config2) {
     this.name = name;
     this.config = config2;
@@ -22091,6 +22097,22 @@ var WorkerNode = class {
     const path6 = shq(socketPath);
     const result = await this.ssh.exec(`test -S ${path6} && ls -i ${path6}`, { timeoutMs: 2e4 });
     return result.code === 0 ? /^\s*(\d+)/.exec(result.stdout)?.[1] : void 0;
+  }
+  /**
+   * Makes sure sessions can start under the work root. When the folder is not
+   * trusted yet, trusts it if the config allows; returns what it found or did.
+   */
+  async ensureWorkRootTrusted() {
+    if (this.workRootTrusted) return "trusted";
+    const root = this.config.workRoot;
+    if (await this.isTrusted(root)) {
+      this.workRootTrusted = true;
+      return "trusted";
+    }
+    if (!this.config.trustWorkRoot) return "untrusted";
+    await this.ssh.execOk(this.helper(`trust-root ${shPath(root)}`), "\u4FE1\u4EFB worker \u4E0A\u7684 workRoot");
+    this.workRootTrusted = true;
+    return "just-trusted";
   }
   async isTrusted(dir) {
     await this.ensureScript();
@@ -22176,7 +22198,7 @@ var WorkerNode = class {
 ${result.stderr}`.trim();
     if (output.includes("not trusted")) {
       throw new ToolError(
-        `worker \u4E0A\u7684\u76EE\u5F55 ${options.cwd} \u8FD8\u6CA1\u6709\u88AB\u4FE1\u4EFB\uFF0C\u540E\u53F0\u4F1A\u8BDD\u65E0\u6CD5\u5728\u91CC\u9762\u542F\u52A8\u3002\u8BF7\u5728 worker \u4E0A\u8FDB\u5165\u8BE5\u76EE\u5F55\u8FD0\u884C\u4E00\u6B21 claude \u5E76\u63A5\u53D7\u4FE1\u4EFB\u63D0\u793A\uFF0C\u7136\u540E\u91CD\u8BD5\u3002`
+        `worker \u4E0A\u7684\u76EE\u5F55 ${options.cwd} \u8FD8\u6CA1\u6709\u88AB\u4FE1\u4EFB\uFF0C\u540E\u53F0\u4F1A\u8BDD\u65E0\u6CD5\u5728\u91CC\u9762\u542F\u52A8\u3002\u8BF7\u5728 worker \u4E0A\u8FDB\u5165 ${this.config.workRoot}\uFF08\u6216\u8BE5\u76EE\u5F55\uFF09\u8FD0\u884C\u4E00\u6B21 claude \u5E76\u63A5\u53D7\u4FE1\u4EFB\u63D0\u793A\uFF0C\u6216\u8005\u5728\u8282\u70B9\u914D\u7F6E\u91CC\u628A trustWorkRoot \u8BBE\u4E3A true \u8BA9\u63D2\u4EF6\u81EA\u52A8\u4FE1\u4EFB workRoot\uFF0C\u7136\u540E\u91CD\u8BD5\u3002`
       );
     }
     const id = /backgrounded\s*\S\s*([0-9a-f]{6,})/.exec(output)?.[1];
@@ -22295,6 +22317,12 @@ var Master = class {
         `\u6743\u9650\u6A21\u5F0F\uFF1A${permissionMode2}`,
         follow + quotaNote
       ].join("\n");
+    }
+    if (await node.ensureWorkRootTrusted() === "untrusted") {
+      throw new ToolError(
+        `\u6CA1\u6709\u6D3E\u53D1\uFF1Aworker\u300C${node.name}\u300D\u4E0A\u7684 workRoot\uFF08${node.config.workRoot}\uFF09\u8FD8\u6CA1\u6709\u88AB Claude Code \u4FE1\u4EFB\uFF0C\u540E\u53F0\u4F1A\u8BDD\u65E0\u6CD5\u5728\u91CC\u9762\u542F\u52A8\u3002
+\u4E24\u79CD\u89E3\u51B3\u529E\u6CD5\uFF1A\u5728 worker \u4E0A\u8FDB\u5165\u8BE5\u76EE\u5F55\u8FD0\u884C\u4E00\u6B21 claude \u5E76\u63A5\u53D7\u4FE1\u4EFB\u63D0\u793A\uFF1B\u6216\u5728\u8282\u70B9\u914D\u7F6E\u91CC\u7ED9\u8FD9\u4E2A\u8282\u70B9\u52A0 "trustWorkRoot": true\uFF0C\u8BA9\u63D2\u4EF6\u81EA\u52A8\u4FE1\u4EFB\u5B83\u3002`
+      );
     }
     const job = { worker: node.name, phase: "\u6B63\u5728 worker \u4E0A\u514B\u9686\u6216\u66F4\u65B0\u9879\u76EE", startedAt: Date.now() };
     this.preparing.set(name, job);
@@ -22538,8 +22566,18 @@ ${indent(usage.lines)}${low}`;
         if (!inbox) throw new ToolError("\u627E\u4E0D\u5230\uFF0Cworker \u7684\u6D88\u606F\u5C06\u65E0\u6CD5\u9001\u8FBE");
         return inbox;
       });
+      const root = node.config.workRoot;
+      await step("workRoot \u4FE1\u4EFB", async () => {
+        const state = await node.ensureWorkRootTrusted();
+        if (state === "untrusted") {
+          throw new ToolError(
+            `${root} \u672A\u88AB\u4FE1\u4EFB\uFF1A\u8BF7\u5728 worker \u4E0A\u8FDB\u5165\u8BE5\u76EE\u5F55\u8FD0\u884C\u4E00\u6B21 claude \u5E76\u63A5\u53D7\u4FE1\u4EFB\u63D0\u793A\uFF0C\u6216\u5728\u8282\u70B9\u914D\u7F6E\u91CC\u8BBE\u7F6E "trustWorkRoot": true`
+          );
+        }
+        return state === "just-trusted" ? `${root} \u5DF2\u81EA\u52A8\u4FE1\u4EFB\uFF08trustWorkRoot \u5DF2\u5F00\u542F\uFF09` : `${root} \u5DF2\u4FE1\u4EFB`;
+      });
       const cwd = args.cwd;
-      if (cwd) {
+      if (cwd && cwd !== root) {
         await step("\u76EE\u5F55\u4FE1\u4EFB", async () => {
           if (await node.isTrusted(cwd)) return `${cwd} \u5DF2\u4FE1\u4EFB`;
           throw new ToolError(`${cwd} \u672A\u88AB\u4FE1\u4EFB\uFF1A\u8BF7\u5728 worker \u4E0A\u8FDB\u5165\u8BE5\u76EE\u5F55\u8FD0\u884C\u4E00\u6B21 claude \u5E76\u63A5\u53D7\u4FE1\u4EFB\u63D0\u793A`);
@@ -22633,7 +22671,7 @@ server.registerTool(
 server.registerTool(
   "worker_check",
   {
-    description: "\u81EA\u68C0\u4E00\u4E2A\u8282\u70B9\uFF1ASSH\u3001claude\u3001node\u3001\u811A\u672C\u7248\u672C\u3001\u767B\u5F55\u3001\u6536\u4EF6\u7BB1\uFF1B\u7ED9\u51FA cwd \u65F6\u8FD8\u68C0\u67E5\u8BE5\u76EE\u5F55\u662F\u5426\u5DF2\u4FE1\u4EFB\u3002",
+    description: "\u81EA\u68C0\u4E00\u4E2A\u8282\u70B9\uFF1ASSH\u3001claude\u3001node\u3001\u811A\u672C\u7248\u672C\u3001\u767B\u5F55\u3001\u6536\u4EF6\u7BB1\u3001workRoot \u662F\u5426\u5DF2\u4FE1\u4EFB\uFF08\u914D\u7F6E\u4E86 trustWorkRoot \u65F6\u4F1A\u81EA\u52A8\u4FE1\u4EFB\uFF09\uFF1B\u7ED9\u51FA cwd \u65F6\u8FD8\u68C0\u67E5\u8BE5\u76EE\u5F55\u3002",
     inputSchema: { worker, cwd: external_exports.string().optional().describe("\u8981\u68C0\u67E5\u4FE1\u4EFB\u72B6\u6001\u7684 worker \u76EE\u5F55") }
   },
   textTool((args) => master.check(args))

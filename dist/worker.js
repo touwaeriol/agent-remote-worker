@@ -3262,8 +3262,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path4) {
-      let input = path4;
+    function removeDotSegments(path5) {
+      let input = path5;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3337,11 +3337,11 @@ var require_utils = __commonJS({
       }
       return output.join("");
     }
-    function removeDotSegmentsRelative(path4) {
-      if (path4 === "" || path4[0] === "/") {
-        return removeDotSegments(path4);
+    function removeDotSegmentsRelative(path5) {
+      if (path5 === "" || path5[0] === "/") {
+        return removeDotSegments(path5);
       }
-      const segments = path4.split("/");
+      const segments = path5.split("/");
       const last = segments.length - 1;
       const output = [];
       let trailingDirectory = false;
@@ -3704,8 +3704,8 @@ var require_schemes = __commonJS({
       }
       if (wsComponent.resourceName) {
         const queryIndex = wsComponent.resourceName.indexOf("?");
-        const path4 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
-        wsComponent.path = path4 && path4 !== "/" ? path4 : void 0;
+        const path5 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
+        wsComponent.path = path5 && path5 !== "/" ? path5 : void 0;
         wsComponent.query = queryIndex === -1 ? void 0 : wsComponent.resourceName.slice(queryIndex + 1);
         wsComponent.resourceName = void 0;
       }
@@ -7242,12 +7242,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs4, exportName) {
+    function addFormats(ajv, list, fs5, exportName) {
       var _a;
       var _b;
       (_a = (_b = ajv.opts.code).formats) !== null && _a !== void 0 ? _a : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs4[f]);
+        ajv.addFormat(f, fs5[f]);
     }
     module.exports = exports = formatsPlugin;
     Object.defineProperty(exports, "__esModule", { value: true });
@@ -7256,9 +7256,9 @@ var require_dist = __commonJS({
 });
 
 // src/worker/cli.ts
-import fs3 from "node:fs";
-import os3 from "node:os";
-import path3 from "node:path";
+import fs4 from "node:fs";
+import os4 from "node:os";
+import path4 from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/shared/inbox.ts
@@ -7332,17 +7332,74 @@ var RECONNECT_NOTICE = masterMessage(
   "\u4E3B\u8282\u70B9\u521A\u521A\u91CD\u65B0\u8FDE\u4E0A\u3002\u5982\u679C\u4F60\u6709\u6CA1\u9001\u8FBE\u7684\u6C47\u62A5\u6216\u63D0\u95EE\uFF0C\u8BF7\u7528 report_to_master / ask_master \u91CD\u65B0\u53D1\u9001\u5F53\u524D\u72B6\u6001\u3002"
 );
 
-// src/worker/workspace.ts
-import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+// src/worker/trust.ts
 import fs2 from "node:fs";
 import os2 from "node:os";
 import path2 from "node:path";
+var TrustError = class extends Error {
+};
+var defaultConfigFile = () => path2.join(os2.homedir(), ".claude.json");
+var expandHome = (p) => p.replace(/^~(?=$|\/)/, os2.homedir());
+function readConfig(configFile) {
+  try {
+    return JSON.parse(fs2.readFileSync(configFile, "utf8"));
+  } catch (error2) {
+    if (error2.code === "ENOENT") return {};
+    throw new TrustError(`\u65E0\u6CD5\u8BFB\u53D6 ${configFile}\uFF1A${error2.message}`);
+  }
+}
+function isTrusted(dir, configFile = defaultConfigFile()) {
+  const projects = readConfig(configFile).projects ?? {};
+  for (let current = path2.resolve(expandHome(dir)); ; current = path2.dirname(current)) {
+    if (projects[current]?.hasTrustDialogAccepted) return true;
+    if (path2.dirname(current) === current) return false;
+  }
+}
+function enclosingCheckout(dir) {
+  for (let current = dir; ; current = path2.dirname(current)) {
+    if (fs2.existsSync(path2.join(current, ".git"))) return current;
+    if (path2.dirname(current) === current) return void 0;
+  }
+}
+function trustWorkRoot(root, configFile = defaultConfigFile()) {
+  const requested = path2.resolve(expandHome(root));
+  fs2.mkdirSync(requested, { recursive: true });
+  const dir = fs2.realpathSync(requested);
+  if (dir === fs2.realpathSync(os2.homedir())) {
+    throw new TrustError("workRoot \u4E0D\u80FD\u662F\u4E3B\u76EE\u5F55\uFF1AClaude Code \u4E0D\u4F1A\u957F\u671F\u4FE1\u4EFB\u4E3B\u76EE\u5F55\u3002");
+  }
+  const checkout = enclosingCheckout(dir);
+  if (checkout) {
+    throw new TrustError(`workRoot \u5728 git \u4ED3\u5E93 ${checkout} \u91CC\u9762\uFF1A\u4FE1\u4EFB\u4F1A\u8BB0\u5728\u6574\u4E2A\u4ED3\u5E93\u4E0A\uFF0C\u8BF7\u6362\u4E00\u4E2A\u4ED3\u5E93\u4E4B\u5916\u7684\u76EE\u5F55\u3002`);
+  }
+  if (fs2.existsSync(path2.join(dir, ".claude")) || fs2.existsSync(path2.join(dir, ".mcp.json"))) {
+    throw new TrustError(`${dir} \u91CC\u5DF2\u6709 Claude Code \u7684\u914D\u7F6E\uFF08.claude \u6216 .mcp.json\uFF09\uFF0C\u9700\u8981\u4F60\u4EB2\u81EA\u786E\u8BA4\uFF1A\u8BF7\u5728\u8BE5\u76EE\u5F55\u8FD0\u884C\u4E00\u6B21 claude\u3002`);
+  }
+  if (isTrusted(dir, configFile)) return false;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const config2 = readConfig(configFile);
+    const projects = config2.projects ??= {};
+    projects[dir] = { ...projects[dir], hasTrustDialogAccepted: true };
+    const temporary = `${configFile}.agent-remote-worker.${process.pid}`;
+    const mode = fs2.existsSync(configFile) ? fs2.statSync(configFile).mode & 511 : 384;
+    fs2.writeFileSync(temporary, JSON.stringify(config2, null, 2), { mode });
+    fs2.renameSync(temporary, configFile);
+    if (isTrusted(dir, configFile)) return true;
+  }
+  throw new TrustError(`\u5199\u5165 ${configFile} \u540E\u4FE1\u4EFB\u8BB0\u5F55\u4ECD\u7136\u4E0D\u5728\uFF0C\u53EF\u80FD\u6709\u4F1A\u8BDD\u5728\u540C\u65F6\u6539\u5199\u8FD9\u4E2A\u6587\u4EF6\u3002\u8BF7\u91CD\u8BD5\u3002`);
+}
+
+// src/worker/workspace.ts
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import fs3 from "node:fs";
+import os3 from "node:os";
+import path3 from "node:path";
 var WorkspaceError = class extends Error {
 };
 var SESSIONS = "sessions";
 var CLONE_TIMEOUT_MS = 10 * 6e4;
-var expandHome = (p) => p.replace(/^~(?=$|\/)/, os2.homedir());
+var expandHome2 = (p) => p.replace(/^~(?=$|\/)/, os3.homedir());
 var safeName = (value) => value.replace(/[^0-9A-Za-z._-]/g, "-").replace(/^[.-]+/, "") || "x";
 function projectName(url) {
   const last = url.replace(/[/\\]+$/, "").split(/[/:\\]/).pop() ?? "";
@@ -7350,13 +7407,13 @@ function projectName(url) {
 }
 function workspacePaths(root, url, session) {
   const base = `${projectName(url)}-${createHash("sha256").update(url).digest("hex").slice(0, 8)}`;
-  const absoluteRoot = path2.resolve(expandHome(root));
-  const sessionDir = path2.join(absoluteRoot, SESSIONS, base, safeName(session));
+  const absoluteRoot = path3.resolve(expandHome2(root));
+  const sessionDir = path3.join(absoluteRoot, SESSIONS, base, safeName(session));
   return {
     root: absoluteRoot,
-    repo: path2.join(absoluteRoot, "repos", base),
+    repo: path3.join(absoluteRoot, "repos", base),
     sessionDir,
-    worktree: path2.join(sessionDir, projectName(url)),
+    worktree: path3.join(sessionDir, projectName(url)),
     localBranch: `rw/${safeName(session)}`
   };
 }
@@ -7380,10 +7437,10 @@ function git(cwd, args2, timeoutMs = 12e4, showProgress = false) {
 }
 function prepareWorkspace(request) {
   const paths = workspacePaths(request.root, request.url, request.session);
-  fs2.mkdirSync(paths.root, { recursive: true });
-  const cloned = !fs2.existsSync(path2.join(paths.repo, ".git"));
+  fs3.mkdirSync(paths.root, { recursive: true });
+  const cloned = !fs3.existsSync(path3.join(paths.repo, ".git"));
   if (cloned) {
-    fs2.mkdirSync(path2.dirname(paths.repo), { recursive: true });
+    fs3.mkdirSync(path3.dirname(paths.repo), { recursive: true });
     git(void 0, ["clone", "--progress", request.url, paths.repo], CLONE_TIMEOUT_MS, true);
   } else {
     git(paths.repo, ["fetch", "--progress", "--prune", "origin"], CLONE_TIMEOUT_MS, true);
@@ -7393,23 +7450,23 @@ function prepareWorkspace(request) {
   } catch {
     throw new WorkspaceError(`\u63D0\u4EA4 ${request.commit.slice(0, 12)} \u4E0D\u5728\u8FDC\u7AEF\u4ED3\u5E93\u91CC\uFF0C\u4E3B\u8282\u70B9\u9700\u8981\u5148\u63A8\u9001\u3002`);
   }
-  if (fs2.existsSync(paths.sessionDir)) {
+  if (fs3.existsSync(paths.sessionDir)) {
     throw new WorkspaceError(`\u4F1A\u8BDD\u540D\u300C${request.session}\u300D\u5728\u8FD9\u4E2A\u9879\u76EE\u4E0A\u5DF2\u6709\u5DE5\u4F5C\u76EE\u5F55 ${paths.sessionDir}\uFF0C\u8BF7\u6362\u4E00\u4E2A\u540D\u5B57\u3002`);
   }
   git(paths.repo, ["worktree", "prune"]);
-  fs2.mkdirSync(paths.sessionDir, { recursive: true });
+  fs3.mkdirSync(paths.sessionDir, { recursive: true });
   git(paths.repo, ["worktree", "add", "--quiet", "-B", paths.localBranch, paths.worktree, request.commit]);
   return { path: paths.sessionDir, codeDir: paths.worktree, localBranch: paths.localBranch, cloned };
 }
 function removeWorkspace(request) {
-  const sessionDir = path2.resolve(request.path);
-  const managed = path2.join(path2.resolve(expandHome(request.root)), SESSIONS) + path2.sep;
+  const sessionDir = path3.resolve(request.path);
+  const managed = path3.join(path3.resolve(expandHome2(request.root)), SESSIONS) + path3.sep;
   if (!sessionDir.startsWith(managed)) return { removed: false, reason: "\u4E0D\u662F\u672C\u63D2\u4EF6\u521B\u5EFA\u7684\u5DE5\u4F5C\u76EE\u5F55\uFF0C\u672A\u5220\u9664" };
-  if (!fs2.existsSync(sessionDir)) return { removed: false, reason: "\u5DE5\u4F5C\u76EE\u5F55\u5DF2\u4E0D\u5B58\u5728" };
-  const inside = fs2.readdirSync(sessionDir).map((entry) => path2.join(sessionDir, entry));
-  const worktree = inside.find((entry) => fs2.existsSync(path2.join(entry, ".git")));
+  if (!fs3.existsSync(sessionDir)) return { removed: false, reason: "\u5DE5\u4F5C\u76EE\u5F55\u5DF2\u4E0D\u5B58\u5728" };
+  const inside = fs3.readdirSync(sessionDir).map((entry) => path3.join(sessionDir, entry));
+  const worktree = inside.find((entry) => fs3.existsSync(path3.join(entry, ".git")));
   if (!worktree) {
-    fs2.rmSync(sessionDir, { recursive: true, force: true });
+    fs3.rmSync(sessionDir, { recursive: true, force: true });
     return { removed: true };
   }
   if (!request.force) {
@@ -7423,10 +7480,10 @@ function removeWorkspace(request) {
       return { removed: false, reason: `\u5DE5\u4F5C\u76EE\u5F55\u91CC\u8FD8\u6709${parts.join("\u548C")}` };
     }
   }
-  const repo = path2.dirname(git(worktree, ["rev-parse", "--path-format=absolute", "--git-common-dir"]));
+  const repo = path3.dirname(git(worktree, ["rev-parse", "--path-format=absolute", "--git-common-dir"]));
   const branch = git(worktree, ["rev-parse", "--abbrev-ref", "HEAD"]);
   git(repo, ["worktree", "remove", "--force", worktree]);
-  fs2.rmSync(sessionDir, { recursive: true, force: true });
+  fs3.rmSync(sessionDir, { recursive: true, force: true });
   if (branch.startsWith("rw/")) {
     try {
       git(repo, ["branch", "-D", branch]);
@@ -7463,16 +7520,16 @@ function prep(masterId) {
     return 2;
   }
   let base = process.env.XDG_RUNTIME_DIR;
-  if (!base || !fs3.existsSync(base)) base = `/tmp/agent-remote-worker-${os3.userInfo().uid}`;
-  const dir = path3.join(base, "agent-remote-worker");
-  fs3.mkdirSync(dir, { recursive: true, mode: 448 });
-  const owner = fs3.lstatSync(dir);
-  if (!owner.isDirectory() || owner.uid !== os3.userInfo().uid || (owner.mode & 63) !== 0) {
+  if (!base || !fs4.existsSync(base)) base = `/tmp/agent-remote-worker-${os4.userInfo().uid}`;
+  const dir = path4.join(base, "agent-remote-worker");
+  fs4.mkdirSync(dir, { recursive: true, mode: 448 });
+  const owner = fs4.lstatSync(dir);
+  if (!owner.isDirectory() || owner.uid !== os4.userInfo().uid || (owner.mode & 63) !== 0) {
     console.error(`refusing to use ${dir}: not a private directory of this user`);
     return 4;
   }
-  const socket = path3.join(dir, `master-${id}.sock`);
-  fs3.rmSync(socket, { force: true });
+  const socket = path4.join(dir, `master-${id}.sock`);
+  fs4.rmSync(socket, { force: true });
   const result = {
     socket,
     script: fileURLToPath(import.meta.url),
@@ -7482,23 +7539,21 @@ function prep(masterId) {
   return 0;
 }
 function trust(dirArg) {
-  let dir = path3.resolve((dirArg ?? ".").replace(/^~(?=$|\/)/, os3.homedir()));
-  let projects = {};
-  try {
-    projects = JSON.parse(fs3.readFileSync(path3.join(os3.homedir(), ".claude.json"), "utf8")).projects ?? {};
-  } catch {
-  }
-  for (; ; ) {
-    if (projects[dir]?.hasTrustDialogAccepted) {
-      console.log("true");
-      return 0;
-    }
-    const parent = path3.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  console.log("false");
+  console.log(isTrusted(dirArg ?? ".") ? "true" : "false");
   return 0;
+}
+function trustRoot(dirArg) {
+  if (!dirArg) {
+    console.error("usage: trust-root <dir>");
+    return 2;
+  }
+  try {
+    console.log(trustWorkRoot(dirArg) ? "trusted" : "already");
+    return 0;
+  } catch (error2) {
+    console.error(error2 instanceof TrustError ? error2.message : String(error2));
+    return 5;
+  }
 }
 async function workspace(action) {
   try {
@@ -7552,6 +7607,8 @@ async function runCli(command2, args2) {
       return prep(args2[0]);
     case "trust":
       return trust(args2[0]);
+    case "trust-root":
+      return trustRoot(args2[0]);
     default:
       console.error("usage: worker.js serve | post <pid> | prep <master-id> | trust <dir>");
       return 2;
@@ -8036,8 +8093,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path4, errorMaps, issueData } = params;
-  const fullPath = [...path4, ...issueData.path || []];
+  const { data, path: path5, errorMaps, issueData } = params;
+  const fullPath = [...path5, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -8153,11 +8210,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path4, key) {
+  constructor(parent, value, path5, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path4;
+    this._path = path5;
     this._key = key;
   }
   get path() {
@@ -11794,10 +11851,10 @@ function assignProp(target, prop, value) {
     configurable: true
   });
 }
-function getElementAtPath(obj, path4) {
-  if (!path4)
+function getElementAtPath(obj, path5) {
+  if (!path5)
     return obj;
-  return path4.reduce((acc, key) => acc?.[key], obj);
+  return path5.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -12117,11 +12174,11 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path4, issues) {
+function prefixIssues(path5, issues) {
   return issues.map((iss) => {
     var _a;
     (_a = iss).path ?? (_a.path = []);
-    iss.path.unshift(path4);
+    iss.path.unshift(path5);
     return iss;
   });
 }
@@ -15532,11 +15589,11 @@ function normalizeObjectSchema(schema) {
   }
   return void 0;
 }
-function getDotPath(path4) {
-  if (path4.length === 0) {
+function getDotPath(path5) {
+  if (path5.length === 0) {
     return "object root";
   }
-  return path4.reduce((acc, seg, index) => {
+  return path5.reduce((acc, seg, index) => {
     if (index === 0) {
       return String(seg);
     }

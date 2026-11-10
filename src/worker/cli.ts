@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { postToInbox, sessionInbox } from "../shared/inbox.ts";
 import { QUESTION_FORWARDED, QUESTION_NOT_FORWARDED, workerMessage } from "../shared/protocol.ts";
+import { TrustError, isTrusted, trustWorkRoot } from "./trust.ts";
 import { WorkspaceError, prepareWorkspace, removeWorkspace } from "./workspace.ts";
 
 /** What `prep` prints: where the master's inbox will appear, and how to start us. */
@@ -66,24 +67,23 @@ function prep(masterId: string | undefined): number {
 
 /** trust <dir>: whether Claude Code already trusts that folder (or a parent of it). */
 function trust(dirArg: string | undefined): number {
-  let dir = path.resolve((dirArg ?? ".").replace(/^~(?=$|\/)/, os.homedir()));
-  let projects: Record<string, { hasTrustDialogAccepted?: boolean }> = {};
-  try {
-    projects = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".claude.json"), "utf8")).projects ?? {};
-  } catch {
-    // no config yet means nothing is trusted
-  }
-  for (;;) {
-    if (projects[dir]?.hasTrustDialogAccepted) {
-      console.log("true");
-      return 0;
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  console.log("false");
+  console.log(isTrusted(dirArg ?? ".") ? "true" : "false");
   return 0;
+}
+
+/** trust-root <dir>: trust the work root without the interactive prompt; prints whether it changed. */
+function trustRoot(dirArg: string | undefined): number {
+  if (!dirArg) {
+    console.error("usage: trust-root <dir>");
+    return 2;
+  }
+  try {
+    console.log(trustWorkRoot(dirArg) ? "trusted" : "already");
+    return 0;
+  } catch (error) {
+    console.error(error instanceof TrustError ? error.message : String(error));
+    return 5;
+  }
 }
 
 /** workspace-add / workspace-remove: the request is JSON on stdin, the answer JSON on stdout. */
@@ -155,6 +155,8 @@ export async function runCli(command: string | undefined, args: string[]): Promi
       return prep(args[0]);
     case "trust":
       return trust(args[0]);
+    case "trust-root":
+      return trustRoot(args[0]);
     default:
       console.error("usage: worker.js serve | post <pid> | prep <master-id> | trust <dir>");
       return 2;

@@ -122,3 +122,27 @@ test("formatQuestions keeps the question and its options", () => {
   });
   assert.equal(text, "A 还是 B？\n  - A：快\n  - B");
 });
+
+test("trustWorkRoot trusts only a plain folder the plugin controls, and keeps the rest of the config", async () => {
+  const { isTrusted, trustWorkRoot } = await import("../src/worker/trust.ts");
+  const configFile = path.join(tmp, "claude.json");
+  fs.writeFileSync(configFile, JSON.stringify({ numStartups: 7, projects: { "/other": { hasTrustDialogAccepted: true, x: 1 } } }));
+
+  const workRoot = path.join(tmp, "trust-root");
+  assert.equal(isTrusted(workRoot, configFile), false);
+  assert.equal(trustWorkRoot(workRoot, configFile), true);
+  assert.equal(trustWorkRoot(workRoot, configFile), false); // nothing left to do
+  assert.equal(isTrusted(path.join(workRoot, "sessions", "a", "b"), configFile), true); // plain subfolders inherit
+
+  const config = JSON.parse(fs.readFileSync(configFile, "utf8"));
+  assert.equal(config.numStartups, 7);
+  assert.deepEqual(config.projects["/other"], { hasTrustDialogAccepted: true, x: 1 });
+
+  // inside a checkout the trust would land on the whole repository
+  assert.throws(() => trustWorkRoot(path.join(master, "work"), configFile), /git 仓库/);
+  // a folder that already carries Claude Code settings needs a person to look
+  const configured = path.join(tmp, "configured");
+  fs.mkdirSync(path.join(configured, ".claude"), { recursive: true });
+  assert.throws(() => trustWorkRoot(configured, configFile), /亲自确认/);
+  assert.throws(() => trustWorkRoot("~", configFile), /主目录/);
+});

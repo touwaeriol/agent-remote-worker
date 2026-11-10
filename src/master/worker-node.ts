@@ -71,6 +71,7 @@ export class WorkerNode {
   readonly config: WorkerConfig;
   readonly ssh: SshHost;
   private scriptCurrent = false;
+  private workRootTrusted = false;
 
   constructor(name: string, config: WorkerConfig) {
     this.name = name;
@@ -127,6 +128,23 @@ export class WorkerNode {
     const path = shq(socketPath);
     const result = await this.ssh.exec(`test -S ${path} && ls -i ${path}`, { timeoutMs: 20_000 });
     return result.code === 0 ? /^\s*(\d+)/.exec(result.stdout)?.[1] : undefined;
+  }
+
+  /**
+   * Makes sure sessions can start under the work root. When the folder is not
+   * trusted yet, trusts it if the config allows; returns what it found or did.
+   */
+  async ensureWorkRootTrusted(): Promise<"trusted" | "just-trusted" | "untrusted"> {
+    if (this.workRootTrusted) return "trusted";
+    const root = this.config.workRoot;
+    if (await this.isTrusted(root)) {
+      this.workRootTrusted = true;
+      return "trusted";
+    }
+    if (!this.config.trustWorkRoot) return "untrusted";
+    await this.ssh.execOk(this.helper(`trust-root ${shPath(root)}`), "信任 worker 上的 workRoot");
+    this.workRootTrusted = true;
+    return "just-trusted";
   }
 
   async isTrusted(dir: string): Promise<boolean> {
@@ -218,7 +236,8 @@ export class WorkerNode {
     if (output.includes("not trusted")) {
       throw new ToolError(
         `worker 上的目录 ${options.cwd} 还没有被信任，后台会话无法在里面启动。` +
-          "请在 worker 上进入该目录运行一次 claude 并接受信任提示，然后重试。",
+          `请在 worker 上进入 ${this.config.workRoot}（或该目录）运行一次 claude 并接受信任提示，` +
+          "或者在节点配置里把 trustWorkRoot 设为 true 让插件自动信任 workRoot，然后重试。",
       );
     }
     const id = /backgrounded\s*\S\s*([0-9a-f]{6,})/.exec(output)?.[1];

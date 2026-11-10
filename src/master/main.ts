@@ -114,7 +114,8 @@ server.registerTool(
 server.registerTool(
   "worker_check",
   {
-    description: "自检一个节点：SSH、claude、node、脚本版本、登录、收件箱；给出 cwd 时还检查该目录是否已信任。",
+    description:
+      "自检一个节点：SSH、claude、node、脚本版本、登录、收件箱、workRoot 是否已信任（配置了 trustWorkRoot 时会自动信任）；给出 cwd 时还检查该目录。",
     inputSchema: { worker, cwd: z.string().optional().describe("要检查信任状态的 worker 目录") },
   },
   textTool((args) => master.check(args)),

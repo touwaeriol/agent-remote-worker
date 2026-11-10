@@ -27,7 +27,7 @@ Claude Code 插件 `agent-remote-worker`。
 | Node.js | 18 以上，`node` 在 `PATH` 里 | 18 以上 |
 | SSH | 能免密登录 worker | — |
 | Git | 项目已提交并推送 | 有和主节点相同的仓库权限，密钥已配置 |
-| 其他 | — | `workRoot` 目录已被 Claude Code 信任（一次即可） |
+| 其他 | — | `workRoot` 目录已被 Claude Code 信任（手动一次，或开启 `trustWorkRoot`） |
 
 ## 安装和配置
 
@@ -49,6 +49,7 @@ Claude Code 插件 `agent-remote-worker`。
          "ssh": "worker",
          "claudePath": "/home/USER/.local/bin/claude",
          "workRoot": "~/agent-remote-worker",
+         "trustWorkRoot": true,
          "permissionMode": "auto"
        }
      },
@@ -60,7 +61,8 @@ Claude Code 插件 `agent-remote-worker`。
    | --- | --- |
    | `ssh` | `~/.ssh/config` 里的主机别名。密钥和端口留在 SSH 配置里 |
    | `claudePath` | worker 上 `claude` 的绝对路径。非交互 SSH 的 `PATH` 里常常没有它 |
-   | `workRoot` | worker 上放项目的目录，默认 `~/agent-remote-worker`。在 worker 上进入它运行一次 `claude` 并接受信任提示 |
+   | `workRoot` | worker 上放项目的目录，默认 `~/agent-remote-worker`。它必须被 worker 上的 Claude Code 信任，并且不能在某个 git 仓库里面 |
+   | `trustWorkRoot` | 设为 `true` 时，插件发现 `workRoot` 未被信任就自动信任它；默认 `false`，这时需要你在 worker 上进入该目录运行一次 `claude` 并接受信任提示 |
    | `nodePath` | worker 上 `node` 的路径。默认在 `claude` 所在目录和 `PATH` 里找 |
    | `permissionMode` | 该节点的默认权限模式：`auto`、`bypassPermissions`、`dontAsk`、`acceptEdits` |
    | `minRemainingPercent` | worker 本周额度剩余低于这个百分比时拒绝派发，默认 10 |
@@ -97,6 +99,10 @@ worker 上的内置提问工具（`AskUserQuestion`）会被一个钩子拦下�
 ```
 
 会话从 worktree 外面的普通目录启动：Claude Code 允许普通目录继承 `workRoot` 的信任，但每个 git 检出都要单独确认，而后台会话没有人可以点确认。
+
+## 关于自动信任
+
+Claude Code 只在已信任的目录里启动后台会话，信任记录在 worker 用户的 `~/.claude.json` 里（`projects["<目录>"].hasTrustDialogAccepted`）。开启 `trustWorkRoot` 后，插件替你写入 `workRoot` 这一项，范围只限这一个目录，并且在以下情况拒绝：`workRoot` 是主目录、在某个 git 仓库里面、或里面已经有 `.claude` 或 `.mcp.json`。克隆下来的仓库本身不会被信任。
 
 ## 权限模式
 

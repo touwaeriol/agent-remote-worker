@@ -68,6 +68,6 @@ worker 汇报完成后：
 
 ## 出问题时
 
-- **通知说目录未被信任**：需要用户在 worker 上进入节点配置的 `workRoot` 运行一次 `claude` 并接受信任提示。只需一次。
+- **工具说 workRoot 未被信任**：告诉用户两种办法，由用户选：在 worker 上进入节点配置的 `workRoot` 运行一次 `claude` 并接受信任提示；或在 `~/.claude/workers.json` 里给该节点加 `"trustWorkRoot": true`，让插件自动信任。不要自己去改这个配置。
 - **会话状态是“卡在权限确认”**：告诉用户，可以用 `worker_stop` 后以别的 `permission_mode` 执行 `worker_resume`。
 - **长时间没有消息**：用 `worker_status` 看状态，再用 `worker_send` 问进度。
