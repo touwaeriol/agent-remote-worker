@@ -44,8 +44,8 @@ function prep(masterId: string | undefined): number {
     return 2;
   }
   let base = process.env.XDG_RUNTIME_DIR;
-  if (!base || !fs.existsSync(base)) base = `/tmp/remote-workers-${os.userInfo().uid}`;
-  const dir = path.join(base, "remote-workers");
+  if (!base || !fs.existsSync(base)) base = `/tmp/agent-remote-worker-${os.userInfo().uid}`;
+  const dir = path.join(base, "agent-remote-worker");
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   // /tmp is shared: refuse a directory someone else prepared for us.
   const owner = fs.lstatSync(dir);

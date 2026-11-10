@@ -62,7 +62,7 @@ test("describeSession flags an exited process", () => {
 
 test("messages carry who sent them and how to answer", () => {
   const message = workerMessage("box", "cw-1", "question", " A or B? ");
-  assert.match(message, /^\[remote-workers\] worker「box」会话「cw-1」的提问：\nA or B\?/);
+  assert.match(message, /^\[agent-remote-worker\] worker「box」会话「cw-1」的提问：\nA or B\?/);
   assert.match(message, /worker_send\(worker="box", session="cw-1"/);
   assert.match(taskBrief("do it"), /任务：\ndo it$/);
 });

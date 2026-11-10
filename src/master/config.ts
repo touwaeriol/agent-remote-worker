@@ -18,7 +18,7 @@ const workerSchema = z.object({
    * Where projects are cloned on the worker. Trust this folder in Claude Code
    * once; the worktrees created inside it are then trusted too.
    */
-  workRoot: z.string().min(1).default("~/remote-workers"),
+  workRoot: z.string().min(1).default("~/agent-remote-worker"),
 });
 
 const configSchema = z.object({
@@ -35,7 +35,7 @@ export type WorkerConfig = z.infer<typeof workerSchema>;
 export type Config = z.infer<typeof configSchema>;
 
 export function configPath(): string {
-  return process.env.REMOTE_WORKERS_CONFIG ?? path.join(os.homedir(), ".claude", "workers.json");
+  return process.env.AGENT_REMOTE_WORKER_CONFIG ?? path.join(os.homedir(), ".claude", "workers.json");
 }
 
 const EXAMPLE = `{
@@ -43,7 +43,7 @@ const EXAMPLE = `{
     "worker": {
       "ssh": "worker",
       "claudePath": "/home/USER/.local/bin/claude",
-      "workRoot": "~/remote-workers",
+      "workRoot": "~/agent-remote-worker",
       "permissionMode": "auto"
     }
   },

@@ -7,20 +7,20 @@ import { textTool } from "../shared/tooling.ts";
 import { Master } from "./master.ts";
 
 const INSTRUCTIONS =
-  "remote-workers：把任务派给其他机器上的 Claude Code 会话（remote worker），它们用的是另一个账号的额度。" +
+  "agent-remote-worker：把任务派给其他机器上的 Claude Code 会话（remote worker），它们用的是另一个账号的额度。" +
   "和内置 Sub Agent 不同：worker 在另一台机器、另一个账号、独立的代码副本上运行，看不到本会话的上下文和文件，" +
   "所以 worker_dispatch 的 task 必须自包含（目标、边界、验收标准）。代码通过 Git 远端同步：派发前本机代码要已提交并推送，" +
   "worker 默认把结果推回本机当前所在的分支，由你 git pull 后审查。" +
   "worker 的提问由你回答：任务范围内你能定的直接回复，需求取舍、有风险或不可逆的操作、超出原任务范围的事先问用户。" +
-  "用户要求派给 worker 时才派发。派发后不需要轮询：worker 的汇报和提问会作为以 [remote-workers] 开头的消息自动出现，用 worker_send 回复。" +
-  "派发前会自动检查 worker 的额度。详细做法见 remote-workers:dispatch skill。";
+  "用户要求派给 worker 时才派发。派发后不需要轮询：worker 的汇报和提问会作为以 [agent-remote-worker] 开头的消息自动出现，用 worker_send 回复。" +
+  "派发前会自动检查 worker 的额度。详细做法见 agent-remote-worker:dispatch skill。";
 
 const worker = z.string().optional().describe("节点名（workers.json 里的键）；只有一个节点时可省略");
 const session = z.string().describe("会话 id 或名字");
 const permissionMode = z.enum(PERMISSION_MODES).optional().describe("覆盖节点默认的权限模式");
 
 const master = new Master();
-const server = new McpServer({ name: "remote-workers", version: VERSION }, { instructions: INSTRUCTIONS });
+const server = new McpServer({ name: "agent-remote-worker", version: VERSION }, { instructions: INSTRUCTIONS });
 
 server.registerTool(
   "worker_dispatch",

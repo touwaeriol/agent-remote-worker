@@ -10,11 +10,11 @@ export const WORKER_ALLOWED_TOOLS = WORKER_TOOL_NAMES.map(
 ).join(",");
 
 /** Where the master installs the worker bundle on a worker machine. */
-export const REMOTE_DIR = "~/.remote-workers";
+export const REMOTE_DIR = "~/.agent-remote-worker";
 export const REMOTE_SCRIPT = `${REMOTE_DIR}/worker.js`;
 
 export const MASTER_PREFIX = "[master]";
-export const WORKER_PREFIX = "[remote-workers]";
+export const WORKER_PREFIX = "[agent-remote-worker]";
 
 export const PERMISSION_MODES = ["auto", "bypassPermissions", "dontAsk", "acceptEdits"] as const;
 export type PermissionMode = (typeof PERMISSION_MODES)[number];
@@ -81,7 +81,7 @@ export const QUESTION_NOT_FORWARDED =
 /** The first prompt of a dispatched session: the ground rules, the code it has, then the task. */
 export function taskBrief(task: string, code?: CodeBase): string {
   return [
-    "你是一个远程 worker 会话：另一台机器上的主节点（master）Claude 通过 remote-workers 把下面的任务派给你。约定：",
+    "你是一个远程 worker 会话：另一台机器上的主节点（master）Claude 通过 agent-remote-worker 把下面的任务派给你。约定：",
     "1. 主节点看不到你的屏幕输出，只能看到你用 mcp__cw__report_to_master 和 mcp__cw__ask_master 发送的内容。",
     '2. 任务完成时必须调用一次 report_to_master(kind="done")，写明做了什么、结果在哪、如何验证。值得主节点知道的中途进展用 kind="progress"，无法自行解决的阻碍用 kind="blocked"。',
     "3. 需要主节点做决定时用 ask_master，然后结束这一轮等待回复。这里没有用户在场，不要用 AskUserQuestion。",

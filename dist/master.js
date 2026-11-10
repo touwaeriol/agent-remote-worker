@@ -21568,10 +21568,10 @@ var WORKER_TOOL_NAMES = ["report_to_master", "ask_master"];
 var WORKER_ALLOWED_TOOLS = WORKER_TOOL_NAMES.map(
   (tool) => `mcp__${WORKER_SERVER}__${tool}`
 ).join(",");
-var REMOTE_DIR = "~/.remote-workers";
+var REMOTE_DIR = "~/.agent-remote-worker";
 var REMOTE_SCRIPT = `${REMOTE_DIR}/worker.js`;
 var MASTER_PREFIX = "[master]";
-var WORKER_PREFIX = "[remote-workers]";
+var WORKER_PREFIX = "[agent-remote-worker]";
 var PERMISSION_MODES = ["auto", "bypassPermissions", "dontAsk", "acceptEdits"];
 function masterMessage(body) {
   return `${MASTER_PREFIX} ${body.trim()}`;
@@ -21591,7 +21591,7 @@ function codeRules(code) {
 var QUESTION_FORWARDED = `\u8FD9\u4E2A\u95EE\u9898\u5DF2\u7ECF\u8F6C\u53D1\u7ED9\u4E3B\u8282\u70B9\uFF0C\u4E0D\u8981\u518D\u8C03\u7528 AskUserQuestion\u3002\u73B0\u5728\u7ED3\u675F\u8FD9\u4E00\u8F6E\u5E76\u7B49\u5F85\uFF1A\u4E3B\u8282\u70B9\u7684\u56DE\u590D\u4F1A\u4F5C\u4E3A\u4E00\u6761\u4EE5 ${MASTER_PREFIX} \u5F00\u5934\u7684\u6D88\u606F\u51FA\u73B0\u3002`;
 function taskBrief(task, code) {
   return [
-    "\u4F60\u662F\u4E00\u4E2A\u8FDC\u7A0B worker \u4F1A\u8BDD\uFF1A\u53E6\u4E00\u53F0\u673A\u5668\u4E0A\u7684\u4E3B\u8282\u70B9\uFF08master\uFF09Claude \u901A\u8FC7 remote-workers \u628A\u4E0B\u9762\u7684\u4EFB\u52A1\u6D3E\u7ED9\u4F60\u3002\u7EA6\u5B9A\uFF1A",
+    "\u4F60\u662F\u4E00\u4E2A\u8FDC\u7A0B worker \u4F1A\u8BDD\uFF1A\u53E6\u4E00\u53F0\u673A\u5668\u4E0A\u7684\u4E3B\u8282\u70B9\uFF08master\uFF09Claude \u901A\u8FC7 agent-remote-worker \u628A\u4E0B\u9762\u7684\u4EFB\u52A1\u6D3E\u7ED9\u4F60\u3002\u7EA6\u5B9A\uFF1A",
     "1. \u4E3B\u8282\u70B9\u770B\u4E0D\u5230\u4F60\u7684\u5C4F\u5E55\u8F93\u51FA\uFF0C\u53EA\u80FD\u770B\u5230\u4F60\u7528 mcp__cw__report_to_master \u548C mcp__cw__ask_master \u53D1\u9001\u7684\u5185\u5BB9\u3002",
     '2. \u4EFB\u52A1\u5B8C\u6210\u65F6\u5FC5\u987B\u8C03\u7528\u4E00\u6B21 report_to_master(kind="done")\uFF0C\u5199\u660E\u505A\u4E86\u4EC0\u4E48\u3001\u7ED3\u679C\u5728\u54EA\u3001\u5982\u4F55\u9A8C\u8BC1\u3002\u503C\u5F97\u4E3B\u8282\u70B9\u77E5\u9053\u7684\u4E2D\u9014\u8FDB\u5C55\u7528 kind="progress"\uFF0C\u65E0\u6CD5\u81EA\u884C\u89E3\u51B3\u7684\u963B\u788D\u7528 kind="blocked"\u3002',
     "3. \u9700\u8981\u4E3B\u8282\u70B9\u505A\u51B3\u5B9A\u65F6\u7528 ask_master\uFF0C\u7136\u540E\u7ED3\u675F\u8FD9\u4E00\u8F6E\u7B49\u5F85\u56DE\u590D\u3002\u8FD9\u91CC\u6CA1\u6709\u7528\u6237\u5728\u573A\uFF0C\u4E0D\u8981\u7528 AskUserQuestion\u3002",
@@ -21791,7 +21791,7 @@ var workerSchema = external_exports.object({
    * Where projects are cloned on the worker. Trust this folder in Claude Code
    * once; the worktrees created inside it are then trusted too.
    */
-  workRoot: external_exports.string().min(1).default("~/remote-workers")
+  workRoot: external_exports.string().min(1).default("~/agent-remote-worker")
 });
 var configSchema = external_exports.object({
   workers: external_exports.record(workerSchema).refine((workers) => Object.keys(workers).length > 0, {
@@ -21803,14 +21803,14 @@ var configSchema = external_exports.object({
   localClaudePath: external_exports.string().optional()
 });
 function configPath() {
-  return process.env.REMOTE_WORKERS_CONFIG ?? path2.join(os3.homedir(), ".claude", "workers.json");
+  return process.env.AGENT_REMOTE_WORKER_CONFIG ?? path2.join(os3.homedir(), ".claude", "workers.json");
 }
 var EXAMPLE = `{
   "workers": {
     "worker": {
       "ssh": "worker",
       "claudePath": "/home/USER/.local/bin/claude",
-      "workRoot": "~/remote-workers",
+      "workRoot": "~/agent-remote-worker",
       "permissionMode": "auto"
     }
   },
@@ -22553,12 +22553,12 @@ ${rows.join("\n")}`;
 };
 
 // src/master/main.ts
-var INSTRUCTIONS = "remote-workers\uFF1A\u628A\u4EFB\u52A1\u6D3E\u7ED9\u5176\u4ED6\u673A\u5668\u4E0A\u7684 Claude Code \u4F1A\u8BDD\uFF08remote worker\uFF09\uFF0C\u5B83\u4EEC\u7528\u7684\u662F\u53E6\u4E00\u4E2A\u8D26\u53F7\u7684\u989D\u5EA6\u3002\u548C\u5185\u7F6E Sub Agent \u4E0D\u540C\uFF1Aworker \u5728\u53E6\u4E00\u53F0\u673A\u5668\u3001\u53E6\u4E00\u4E2A\u8D26\u53F7\u3001\u72EC\u7ACB\u7684\u4EE3\u7801\u526F\u672C\u4E0A\u8FD0\u884C\uFF0C\u770B\u4E0D\u5230\u672C\u4F1A\u8BDD\u7684\u4E0A\u4E0B\u6587\u548C\u6587\u4EF6\uFF0C\u6240\u4EE5 worker_dispatch \u7684 task \u5FC5\u987B\u81EA\u5305\u542B\uFF08\u76EE\u6807\u3001\u8FB9\u754C\u3001\u9A8C\u6536\u6807\u51C6\uFF09\u3002\u4EE3\u7801\u901A\u8FC7 Git \u8FDC\u7AEF\u540C\u6B65\uFF1A\u6D3E\u53D1\u524D\u672C\u673A\u4EE3\u7801\u8981\u5DF2\u63D0\u4EA4\u5E76\u63A8\u9001\uFF0Cworker \u9ED8\u8BA4\u628A\u7ED3\u679C\u63A8\u56DE\u672C\u673A\u5F53\u524D\u6240\u5728\u7684\u5206\u652F\uFF0C\u7531\u4F60 git pull \u540E\u5BA1\u67E5\u3002worker \u7684\u63D0\u95EE\u7531\u4F60\u56DE\u7B54\uFF1A\u4EFB\u52A1\u8303\u56F4\u5185\u4F60\u80FD\u5B9A\u7684\u76F4\u63A5\u56DE\u590D\uFF0C\u9700\u6C42\u53D6\u820D\u3001\u6709\u98CE\u9669\u6216\u4E0D\u53EF\u9006\u7684\u64CD\u4F5C\u3001\u8D85\u51FA\u539F\u4EFB\u52A1\u8303\u56F4\u7684\u4E8B\u5148\u95EE\u7528\u6237\u3002\u7528\u6237\u8981\u6C42\u6D3E\u7ED9 worker \u65F6\u624D\u6D3E\u53D1\u3002\u6D3E\u53D1\u540E\u4E0D\u9700\u8981\u8F6E\u8BE2\uFF1Aworker \u7684\u6C47\u62A5\u548C\u63D0\u95EE\u4F1A\u4F5C\u4E3A\u4EE5 [remote-workers] \u5F00\u5934\u7684\u6D88\u606F\u81EA\u52A8\u51FA\u73B0\uFF0C\u7528 worker_send \u56DE\u590D\u3002\u6D3E\u53D1\u524D\u4F1A\u81EA\u52A8\u68C0\u67E5 worker \u7684\u989D\u5EA6\u3002\u8BE6\u7EC6\u505A\u6CD5\u89C1 remote-workers:dispatch skill\u3002";
+var INSTRUCTIONS = "agent-remote-worker\uFF1A\u628A\u4EFB\u52A1\u6D3E\u7ED9\u5176\u4ED6\u673A\u5668\u4E0A\u7684 Claude Code \u4F1A\u8BDD\uFF08remote worker\uFF09\uFF0C\u5B83\u4EEC\u7528\u7684\u662F\u53E6\u4E00\u4E2A\u8D26\u53F7\u7684\u989D\u5EA6\u3002\u548C\u5185\u7F6E Sub Agent \u4E0D\u540C\uFF1Aworker \u5728\u53E6\u4E00\u53F0\u673A\u5668\u3001\u53E6\u4E00\u4E2A\u8D26\u53F7\u3001\u72EC\u7ACB\u7684\u4EE3\u7801\u526F\u672C\u4E0A\u8FD0\u884C\uFF0C\u770B\u4E0D\u5230\u672C\u4F1A\u8BDD\u7684\u4E0A\u4E0B\u6587\u548C\u6587\u4EF6\uFF0C\u6240\u4EE5 worker_dispatch \u7684 task \u5FC5\u987B\u81EA\u5305\u542B\uFF08\u76EE\u6807\u3001\u8FB9\u754C\u3001\u9A8C\u6536\u6807\u51C6\uFF09\u3002\u4EE3\u7801\u901A\u8FC7 Git \u8FDC\u7AEF\u540C\u6B65\uFF1A\u6D3E\u53D1\u524D\u672C\u673A\u4EE3\u7801\u8981\u5DF2\u63D0\u4EA4\u5E76\u63A8\u9001\uFF0Cworker \u9ED8\u8BA4\u628A\u7ED3\u679C\u63A8\u56DE\u672C\u673A\u5F53\u524D\u6240\u5728\u7684\u5206\u652F\uFF0C\u7531\u4F60 git pull \u540E\u5BA1\u67E5\u3002worker \u7684\u63D0\u95EE\u7531\u4F60\u56DE\u7B54\uFF1A\u4EFB\u52A1\u8303\u56F4\u5185\u4F60\u80FD\u5B9A\u7684\u76F4\u63A5\u56DE\u590D\uFF0C\u9700\u6C42\u53D6\u820D\u3001\u6709\u98CE\u9669\u6216\u4E0D\u53EF\u9006\u7684\u64CD\u4F5C\u3001\u8D85\u51FA\u539F\u4EFB\u52A1\u8303\u56F4\u7684\u4E8B\u5148\u95EE\u7528\u6237\u3002\u7528\u6237\u8981\u6C42\u6D3E\u7ED9 worker \u65F6\u624D\u6D3E\u53D1\u3002\u6D3E\u53D1\u540E\u4E0D\u9700\u8981\u8F6E\u8BE2\uFF1Aworker \u7684\u6C47\u62A5\u548C\u63D0\u95EE\u4F1A\u4F5C\u4E3A\u4EE5 [agent-remote-worker] \u5F00\u5934\u7684\u6D88\u606F\u81EA\u52A8\u51FA\u73B0\uFF0C\u7528 worker_send \u56DE\u590D\u3002\u6D3E\u53D1\u524D\u4F1A\u81EA\u52A8\u68C0\u67E5 worker \u7684\u989D\u5EA6\u3002\u8BE6\u7EC6\u505A\u6CD5\u89C1 agent-remote-worker:dispatch skill\u3002";
 var worker = external_exports.string().optional().describe("\u8282\u70B9\u540D\uFF08workers.json \u91CC\u7684\u952E\uFF09\uFF1B\u53EA\u6709\u4E00\u4E2A\u8282\u70B9\u65F6\u53EF\u7701\u7565");
 var session = external_exports.string().describe("\u4F1A\u8BDD id \u6216\u540D\u5B57");
 var permissionMode = external_exports.enum(PERMISSION_MODES).optional().describe("\u8986\u76D6\u8282\u70B9\u9ED8\u8BA4\u7684\u6743\u9650\u6A21\u5F0F");
 var master = new Master();
-var server = new McpServer({ name: "remote-workers", version: VERSION }, { instructions: INSTRUCTIONS });
+var server = new McpServer({ name: "agent-remote-worker", version: VERSION }, { instructions: INSTRUCTIONS });
 server.registerTool(
   "worker_dispatch",
   {

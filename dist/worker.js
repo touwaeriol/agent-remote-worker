@@ -7307,10 +7307,10 @@ var WORKER_TOOL_NAMES = ["report_to_master", "ask_master"];
 var WORKER_ALLOWED_TOOLS = WORKER_TOOL_NAMES.map(
   (tool) => `mcp__${WORKER_SERVER}__${tool}`
 ).join(",");
-var REMOTE_DIR = "~/.remote-workers";
+var REMOTE_DIR = "~/.agent-remote-worker";
 var REMOTE_SCRIPT = `${REMOTE_DIR}/worker.js`;
 var MASTER_PREFIX = "[master]";
-var WORKER_PREFIX = "[remote-workers]";
+var WORKER_PREFIX = "[agent-remote-worker]";
 var KIND_LABEL = {
   progress: "\u8FDB\u5EA6",
   done: "\u5B8C\u6210\u6C47\u62A5",
@@ -7463,8 +7463,8 @@ function prep(masterId) {
     return 2;
   }
   let base = process.env.XDG_RUNTIME_DIR;
-  if (!base || !fs3.existsSync(base)) base = `/tmp/remote-workers-${os3.userInfo().uid}`;
-  const dir = path3.join(base, "remote-workers");
+  if (!base || !fs3.existsSync(base)) base = `/tmp/agent-remote-worker-${os3.userInfo().uid}`;
+  const dir = path3.join(base, "agent-remote-worker");
   fs3.mkdirSync(dir, { recursive: true, mode: 448 });
   const owner = fs3.lstatSync(dir);
   if (!owner.isDirectory() || owner.uid !== os3.userInfo().uid || (owner.mode & 63) !== 0) {

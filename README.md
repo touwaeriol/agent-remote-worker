@@ -1,6 +1,6 @@
 # agent-remote-worker
 
-Claude Code 插件 `remote-workers`。
+Claude Code 插件 `agent-remote-worker`。
 
 把任务从你正在用的 Claude Code 会话（主节点）派给其他机器上的 Claude Code 会话（worker）。worker 用它自己登录的账号，所以消耗的是另一份额度。两边可以随时互发消息：worker 上报进度、提问，主节点追加要求，双方空闲时都会被消息唤醒。
 
@@ -35,7 +35,7 @@ Claude Code 插件 `remote-workers`。
 
    ```text
    /plugin marketplace add touwaeriol/agent-remote-worker
-   /plugin install remote-workers@agent-remote-worker
+   /plugin install agent-remote-worker@agent-remote-worker
    ```
 
    开发时也可以克隆仓库后直接加载目录：`claude --plugin-dir /path/to/agent-remote-worker`。
@@ -48,7 +48,7 @@ Claude Code 插件 `remote-workers`。
        "worker": {
          "ssh": "worker",
          "claudePath": "/home/USER/.local/bin/claude",
-         "workRoot": "~/remote-workers",
+         "workRoot": "~/agent-remote-worker",
          "permissionMode": "auto"
        }
      },
@@ -60,13 +60,13 @@ Claude Code 插件 `remote-workers`。
    | --- | --- |
    | `ssh` | `~/.ssh/config` 里的主机别名。密钥和端口留在 SSH 配置里 |
    | `claudePath` | worker 上 `claude` 的绝对路径。非交互 SSH 的 `PATH` 里常常没有它 |
-   | `workRoot` | worker 上放项目的目录，默认 `~/remote-workers`。在 worker 上进入它运行一次 `claude` 并接受信任提示 |
+   | `workRoot` | worker 上放项目的目录，默认 `~/agent-remote-worker`。在 worker 上进入它运行一次 `claude` 并接受信任提示 |
    | `nodePath` | worker 上 `node` 的路径。默认在 `claude` 所在目录和 `PATH` 里找 |
    | `permissionMode` | 该节点的默认权限模式：`auto`、`bypassPermissions`、`dontAsk`、`acceptEdits` |
    | `minRemainingPercent` | worker 本周额度剩余低于这个百分比时拒绝派发，默认 10 |
    | `localClaudePath` | 本机 `claude` 的路径，查本机额度时用。默认自动找 |
 
-3. 在会话里运行 `/remote-workers:worker-check worker ~/remote-workers` 自检，第二个参数是 `workRoot`。
+3. 在会话里运行 `/agent-remote-worker:worker-check worker ~/agent-remote-worker` 自检，第二个参数是 `workRoot`。
 
 ## 工具
 
