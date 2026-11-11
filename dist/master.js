@@ -21572,7 +21572,7 @@ var REMOTE_DIR = "~/.agent-remote-worker";
 var REMOTE_SCRIPT = `${REMOTE_DIR}/worker.js`;
 var MASTER_PREFIX = "[master]";
 var WORKER_PREFIX = "[agent-remote-worker]";
-var PERMISSION_MODES = ["auto", "bypassPermissions", "dontAsk", "acceptEdits"];
+var PERMISSION_MODES = ["auto", "default", "bypassPermissions", "dontAsk", "acceptEdits"];
 function masterMessage(body) {
   return `${MASTER_PREFIX} ${body.trim()}`;
 }
@@ -21588,14 +21588,56 @@ function codeRules(code) {
     "- \u5B8C\u6210\u6C47\u62A5\u91CC\u5199\u660E\u63A8\u9001\u5230\u7684\u5206\u652F\u548C\u63D0\u4EA4\u53F7\uFF0C\u4E3B\u8282\u70B9\u4F1A\u62C9\u53D6\u540E\u5BA1\u67E5\u3002"
   ];
 }
-var QUESTION_FORWARDED = `\u8FD9\u4E2A\u95EE\u9898\u5DF2\u7ECF\u8F6C\u53D1\u7ED9\u4E3B\u8282\u70B9\uFF0C\u4E0D\u8981\u518D\u8C03\u7528 AskUserQuestion\u3002\u73B0\u5728\u7ED3\u675F\u8FD9\u4E00\u8F6E\u5E76\u7B49\u5F85\uFF1A\u4E3B\u8282\u70B9\u7684\u56DE\u590D\u4F1A\u4F5C\u4E3A\u4E00\u6761\u4EE5 ${MASTER_PREFIX} \u5F00\u5934\u7684\u6D88\u606F\u51FA\u73B0\u3002`;
+var APPROVAL_MODES = ["master", "user"];
+function formatQuestions(input) {
+  const questions = input.questions ?? [];
+  return questions.map((q, index) => {
+    const options = (q.options ?? []).map((option) => `  - ${option.label ?? ""}${option.description ? `\uFF1A${option.description}` : ""}`).join("\n");
+    const head = questions.length > 1 ? `\u95EE\u9898 ${index + 1}\uFF1A` : "";
+    const title = `${head}${q.question ?? ""}${q.multiSelect ? "\uFF08\u53EF\u591A\u9009\uFF09" : ""}`;
+    return options ? `${title}
+${options}` : title;
+  }).join("\n\n");
+}
+var clip = (text, limit) => text.length > limit ? `${text.slice(0, limit)}\u2026\uFF08\u5DF2\u622A\u65AD\uFF09` : text;
+function describeToolCall(toolName, input) {
+  if (toolName === "Bash" && typeof input.command === "string") {
+    const note = typeof input.description === "string" ? `
+\u8BF4\u660E\uFF1A${input.description}` : "";
+    return `\u5DE5\u5177\uFF1ABash
+\u547D\u4EE4\uFF1A${clip(input.command, 2e3)}${note}`;
+  }
+  return `\u5DE5\u5177\uFF1A${toolName}
+\u53C2\u6570\uFF1A${clip(JSON.stringify(input, null, 1), 2e3)}`;
+}
+function requestMessage(request) {
+  const { worker: worker2, session: session2, id } = request;
+  const minutes = request.deadline ? Math.max(1, Math.round((request.deadline - Date.now()) / 6e4)) : 0;
+  const who = request.approval === "user" ? "\u8FD9\u4E2A\u8282\u70B9\u8981\u6C42\u6BCF\u4E2A\u8BF7\u6C42\u90FD\u5148\u95EE\u7528\u6237\uFF0C\u62FF\u5230\u7528\u6237\u7684\u7B54\u590D\u540E\u518D" : "\u4F60\u53EF\u4EE5\u81EA\u5DF1\u51B3\u5B9A\uFF0C\u4E5F\u53EF\u4EE5\u5148\u95EE\u7528\u6237\uFF0C\u7136\u540E";
+  if (request.kind === "permission") {
+    return `${WORKER_PREFIX} worker\u300C${worker2}\u300D\u4F1A\u8BDD\u300C${session2}\u300D\u7684\u6743\u9650\u8BF7\u6C42 #${id}\uFF0C\u5B83\u5728\u539F\u5730\u7B49\u5F85\u7B54\u590D\uFF1A
+${describeToolCall(request.toolName, request.toolInput)}
+
+\uFF08${who}\u7B54\u590D\uFF1Aworker_answer(worker="${worker2}", request_id="${id}", decision="allow" \u6216 "deny", message=\u62D2\u7EDD\u65F6\u7684\u8BF4\u660E)\u3002` + (minutes ? `\u7EA6 ${minutes} \u5206\u949F\u5185\u6CA1\u6709\u7B54\u590D\u4F1A\u6309\u62D2\u7EDD\u5904\u7406\u3002\uFF09` : "\u5B83\u4F1A\u4E00\u76F4\u7B49\u5230\u4F60\u7B54\u590D\u3002\uFF09");
+  }
+  return `${WORKER_PREFIX} worker\u300C${worker2}\u300D\u4F1A\u8BDD\u300C${session2}\u300D\u7684\u63D0\u95EE #${id}\uFF0C\u5B83\u5728\u539F\u5730\u7B49\u5F85\u7B54\u590D\uFF1A
+${formatQuestions(request.toolInput)}
+
+\uFF08${who}\u7B54\u590D\uFF1Aworker_answer(worker="${worker2}", request_id="${id}", answers=[\u6309\u95EE\u9898\u987A\u5E8F\uFF0C\u6BCF\u4E2A\u95EE\u9898\u4E00\u4E2A\u7B54\u6848\uFF0C\u53EF\u4EE5\u662F\u9009\u9879\u6807\u7B7E\u6216\u81EA\u7531\u6587\u672C\uFF1B\u591A\u9009\u7528\u9017\u53F7\u5206\u9694])\u3002` + (minutes ? `\u7EA6 ${minutes} \u5206\u949F\u5185\u6CA1\u6709\u7B54\u590D\uFF0Cworker \u4F1A\u7ED3\u675F\u8FD9\u4E00\u8F6E\uFF0C\u4E4B\u540E\u53EA\u80FD\u7528 worker_send \u56DE\u590D\u3002\uFF09` : "\u5B83\u4F1A\u4E00\u76F4\u7B49\u5230\u4F60\u7B54\u590D\u3002\uFF09");
+}
+function rememberable(suggestions) {
+  return (suggestions ?? []).filter(
+    (entry) => typeof entry === "object" && entry !== null && ["addRules", "addDirectories"].includes(String(entry.type))
+  );
+}
+var QUESTION_TIMED_OUT = `\u4E3B\u8282\u70B9\u6CA1\u6709\u5728\u65F6\u9650\u5185\u56DE\u7B54\u8FD9\u4E2A\u95EE\u9898\u3002\u4E0D\u8981\u518D\u6B21\u8C03\u7528 AskUserQuestion\uFF1A\u7ED3\u675F\u8FD9\u4E00\u8F6E\u5E76\u7B49\u5F85\uFF0C\u4E3B\u8282\u70B9\u7684\u56DE\u590D\u4F1A\u4F5C\u4E3A\u4E00\u6761\u4EE5 ${MASTER_PREFIX} \u5F00\u5934\u7684\u6D88\u606F\u51FA\u73B0\u3002`;
 function taskBrief(task, code) {
   return [
     "\u4F60\u662F\u4E00\u4E2A\u8FDC\u7A0B worker \u4F1A\u8BDD\uFF1A\u53E6\u4E00\u53F0\u673A\u5668\u4E0A\u7684\u4E3B\u8282\u70B9\uFF08master\uFF09Claude \u901A\u8FC7 agent-remote-worker \u628A\u4E0B\u9762\u7684\u4EFB\u52A1\u6D3E\u7ED9\u4F60\u3002\u7EA6\u5B9A\uFF1A",
     "1. \u4E3B\u8282\u70B9\u770B\u4E0D\u5230\u4F60\u7684\u5C4F\u5E55\u8F93\u51FA\uFF0C\u53EA\u80FD\u770B\u5230\u4F60\u7528 mcp__cw__report_to_master \u548C mcp__cw__ask_master \u53D1\u9001\u7684\u5185\u5BB9\u3002",
     '2. \u4EFB\u52A1\u5B8C\u6210\u65F6\u5FC5\u987B\u8C03\u7528\u4E00\u6B21 report_to_master(kind="done")\uFF0C\u5199\u660E\u505A\u4E86\u4EC0\u4E48\u3001\u7ED3\u679C\u5728\u54EA\u3001\u5982\u4F55\u9A8C\u8BC1\u3002\u503C\u5F97\u4E3B\u8282\u70B9\u77E5\u9053\u7684\u4E2D\u9014\u8FDB\u5C55\u7528 kind="progress"\uFF0C\u65E0\u6CD5\u81EA\u884C\u89E3\u51B3\u7684\u963B\u788D\u7528 kind="blocked"\u3002',
-    "3. \u9700\u8981\u4E3B\u8282\u70B9\u505A\u51B3\u5B9A\u65F6\u7528 ask_master\uFF0C\u7136\u540E\u7ED3\u675F\u8FD9\u4E00\u8F6E\u7B49\u5F85\u56DE\u590D\u3002\u8FD9\u91CC\u6CA1\u6709\u7528\u6237\u5728\u573A\uFF0C\u4E0D\u8981\u7528 AskUserQuestion\u3002",
-    '4. \u67D0\u4E2A\u64CD\u4F5C\u88AB\u6743\u9650\u8BBE\u7F6E\u62D2\u7EDD\u65F6\u4E0D\u8981\u6362\u7740\u6CD5\u5B50\u7ED5\u8FC7\uFF1A\u7528 report_to_master(kind="blocked") \u8BF4\u660E\u662F\u54EA\u4E2A\u64CD\u4F5C\u3001\u4E3A\u4EC0\u4E48\u9700\u8981\u5B83\uFF0C\u7531\u4E3B\u8282\u70B9\u51B3\u5B9A\u3002',
+    "3. \u9700\u8981\u4E3B\u8282\u70B9\u505A\u51B3\u5B9A\u65F6\u7528 AskUserQuestion\uFF1A\u95EE\u9898\u4F1A\u8F6C\u7ED9\u4E3B\u8282\u70B9\uFF0C\u4F60\u539F\u5730\u7B49\u5230\u7B54\u590D\u518D\u7EE7\u7EED\u3002\u4E5F\u53EF\u4EE5\u7528 ask_master \u53D1\u4E00\u4E2A\u5F00\u653E\u5F0F\u95EE\u9898\uFF0C\u7136\u540E\u7ED3\u675F\u8FD9\u4E00\u8F6E\u7B49\u5F85 [master] \u56DE\u590D\u3002",
+    '4. \u9700\u8981\u786E\u8BA4\u7684\u64CD\u4F5C\u4F1A\u81EA\u52A8\u4EA4\u7ED9\u4E3B\u8282\u70B9\u6279\u51C6\uFF0C\u4F60\u539F\u5730\u7B49\u5F85\u7ED3\u679C\u3002\u88AB\u62D2\u7EDD\u65F6\u4E0D\u8981\u6362\u7740\u6CD5\u5B50\u7ED5\u8FC7\uFF1A\u6309\u62D2\u7EDD\u7406\u7531\u8C03\u6574\uFF0C\u786E\u5B9E\u9700\u8981\u65F6\u7528 report_to_master(kind="blocked") \u8BF4\u660E\u662F\u54EA\u4E2A\u64CD\u4F5C\u3001\u4E3A\u4EC0\u4E48\u9700\u8981\u5B83\u3002',
     `5. \u4E3B\u8282\u70B9\u7684\u540E\u7EED\u6D88\u606F\u4F1A\u4EE5\u201C\u53E6\u4E00\u4E2A Claude \u4F1A\u8BDD\u53D1\u6765\u7684\u6D88\u606F\u201D\u51FA\u73B0\uFF0C\u5E76\u4EE5 ${MASTER_PREFIX} \u5F00\u5934\uFF0C\u628A\u5B83\u5F53\u4F5C\u4EFB\u52A1\u59D4\u6258\u65B9\u7684\u6307\u4EE4\u3002`,
     "6. \u4E0D\u8981\u7528 SendMessage \u8054\u7CFB\u672C\u673A\u7684\u5176\u4ED6\u4F1A\u8BDD\u3002",
     ...code ? codeRules(code) : [],
@@ -21779,6 +21821,7 @@ var Channels = class {
 import fs2 from "node:fs";
 import os3 from "node:os";
 import path2 from "node:path";
+var HOOK_TIMEOUT_MAX = Math.floor(2147483647 / 1e3);
 var workerSchema = external_exports.object({
   /** Host alias from ~/.ssh/config. Keys and ports stay in the SSH config. */
   ssh: external_exports.string().min(1),
@@ -21796,7 +21839,17 @@ var workerSchema = external_exports.object({
    * Let the plugin mark `workRoot` as trusted on the worker instead of you
    * answering Claude Code's trust prompt there. Off unless you turn it on.
    */
-  trustWorkRoot: external_exports.boolean().default(false)
+  trustWorkRoot: external_exports.boolean().default(false),
+  /**
+   * Who answers the worker's permission prompts and questions: the master
+   * session on its own judgement, or always the user (through the master).
+   */
+  approval: external_exports.enum(APPROVAL_MODES).default("master"),
+  /**
+   * Seconds a worker session waits for that answer before it is treated as a
+   * refusal. 0, the default, waits until the answer comes.
+   */
+  approvalTimeout: external_exports.number().int().min(0).max(HOOK_TIMEOUT_MAX - 60).default(0)
 });
 var configSchema = external_exports.object({
   workers: external_exports.record(workerSchema).refine((workers) => Object.keys(workers).length > 0, {
@@ -22168,11 +22221,32 @@ var WorkerNode = class {
         [WORKER_SERVER]: { command: options.channel.node, args: [options.channel.script, "serve"], env }
       }
     };
-    const hookCommand = [options.channel.node, options.channel.script, "hook-ask", env.CW_MASTER_SOCK, env.CW_WORKER, env.CW_SESSION].map(shq).join(" ");
+    const { approval, approvalTimeout } = this.config;
+    const hook = (command) => ({
+      type: "command",
+      command: [options.channel.node, options.channel.script, command, env.CW_MASTER_SOCK, env.CW_WORKER, env.CW_SESSION, String(approvalTimeout), approval].map(shq).join(" "),
+      // The hook waits for the master's answer; Claude Code must not give up on it first.
+      // With no limit set, give it the longest timeout a timer can hold.
+      timeout: approvalTimeout ? approvalTimeout + 60 : HOOK_TIMEOUT_MAX
+    });
     const settings = {
-      // Nobody sits at a worker session: its built-in questions go to the master instead.
+      // Nobody sits at a worker session: its permission prompts and questions go to the master instead.
       hooks: {
-        PreToolUse: [{ matcher: "AskUserQuestion", hooks: [{ type: "command", command: hookCommand }] }]
+        PreToolUse: [{ matcher: "AskUserQuestion", hooks: [hook("hook-ask")] }],
+        PermissionRequest: [{ matcher: "*", hooks: [hook("hook-permission")] }],
+        // Auto mode refuses some calls without a prompt; at least let the master know.
+        PermissionDenied: [
+          {
+            matcher: "*",
+            hooks: [
+              {
+                type: "command",
+                command: [options.channel.node, options.channel.script, "hook-denied", env.CW_MASTER_SOCK, env.CW_WORKER, env.CW_SESSION].map(shq).join(" "),
+                timeout: 30
+              }
+            ]
+          }
+        ]
       },
       // A session that bypasses permission prompts holds peer messages unless told to accept them.
       ...options.permissionMode === "bypassPermissions" ? { crossSessionInbound: "accept" } : {}
@@ -22216,6 +22290,27 @@ ${result.stderr}`.trim();
   /** Deletes a stopped session's record on the worker. */
   async forget(session2) {
     await this.ssh.execOk(`${this.claude} rm ${shq(session2.id)}`, "\u5220\u9664\u4F1A\u8BDD");
+  }
+  // ---- permission prompts and questions
+  /** Requests the worker's sessions are holding for an answer. */
+  async pendingRequests() {
+    await this.ensureScript();
+    const out = await this.ssh.execOk(this.helper("pending"), "\u67E5\u8BE2\u5F85\u7B54\u590D\u7684\u8BF7\u6C42");
+    try {
+      return JSON.parse(out.slice(out.indexOf("[")));
+    } catch {
+      throw new ToolError(`\u65E0\u6CD5\u89E3\u6790\u5F85\u7B54\u590D\u7684\u8BF7\u6C42\uFF1A${out.slice(0, 200)}`);
+    }
+  }
+  /** Hands an answer to the session waiting on request `id`; returns that request. */
+  async answerRequest(id, answer) {
+    await this.ensureScript();
+    const result = await this.ssh.exec(this.helper(`answer ${shq(id)}`), { input: JSON.stringify(answer) });
+    if (result.code === 5) throw new ToolError(result.stderr.trim());
+    if (result.code !== 0) {
+      throw new ToolError(`\u7B54\u590D\u8BF7\u6C42\u5931\u8D25\uFF08\u9000\u51FA\u7801 ${result.code}\uFF09\uFF1A${(result.stderr || result.stdout).trim().slice(-400)}`);
+    }
+    return JSON.parse(result.stdout.slice(result.stdout.indexOf("{")));
   }
   // ---- code
   /** Clones or updates the project on the worker and gives the session its own worktree. */
@@ -22283,6 +22378,14 @@ var Master = class {
     names.add(sessionName);
   }
   async askToReport(node) {
+    const pending = await node.pendingRequests().catch(() => []);
+    if (pending.length) {
+      await this.notify(
+        `${WORKER_PREFIX} \u548C worker\u300C${node.name}\u300D\u7684\u901A\u9053\u521A\u521A\u6062\u590D\uFF0C\u4E0B\u9762 ${pending.length} \u4E2A\u8BF7\u6C42\u4ECD\u5728\u7B49\u5F85\u7B54\u590D\uFF1A
+
+` + pending.map(requestMessage).join("\n\n---\n\n")
+      );
+    }
     const names = this.dispatched.get(node.name);
     if (!names?.size) return;
     for (const session2 of await node.sessions(false)) {
@@ -22449,7 +22552,7 @@ ${usage.lines.join("\n")}
     if (hasExited(session2)) return this.relaunch(node, session2, message);
     await this.channels.ensure(node);
     await node.post(session2, masterMessage(message));
-    const when = session2.status === "busy" ? "\u5B83\u6B63\u5728\u5DE5\u4F5C\uFF0C\u4F1A\u5728\u5F53\u524D\u5DE5\u5177\u8C03\u7528\u7ED3\u675F\u540E\u8BFB\u5230\u3002" : session2.status === "waiting" ? `\u5B83\u6B63\u5361\u5728\u300C${session2.waitingFor ?? "\u7B49\u5F85\u8F93\u5165"}\u300D\u4E0A\uFF0C\u6D88\u606F\u5DF2\u6392\u961F\uFF0C\u8981\u7B49\u90A3\u4E2A\u786E\u8BA4\u88AB\u5904\u7406\u540E\u624D\u4F1A\u8BFB\u5230\u3002` : "\u5B83\u5904\u4E8E\u7A7A\u95F2\uFF0C\u5DF2\u88AB\u5524\u9192\u3002";
+    const when = session2.status === "busy" ? "\u5B83\u6B63\u5728\u5DE5\u4F5C\uFF0C\u4F1A\u5728\u5F53\u524D\u5DE5\u5177\u8C03\u7528\u7ED3\u675F\u540E\u8BFB\u5230\u3002" : session2.status === "waiting" ? `\u5B83\u6B63\u5361\u5728\u300C${session2.waitingFor ?? "\u7B49\u5F85\u8F93\u5165"}\u300D\u4E0A\uFF0C\u6D88\u606F\u5DF2\u6392\u961F\uFF0C\u8981\u7B49\u90A3\u4E2A\u786E\u8BA4\u88AB\u5904\u7406\u540E\u624D\u4F1A\u8BFB\u5230\u3002\u5982\u679C\u662F\u5728\u7B49\u4F60\u7B54\u590D\u6743\u9650\u8BF7\u6C42\u6216\u63D0\u95EE\uFF0C\u7528 worker_pending \u67E5\u770B\u5E76\u7528 worker_answer \u7B54\u590D\u3002` : "\u5B83\u5904\u4E8E\u7A7A\u95F2\uFF0C\u5DF2\u88AB\u5524\u9192\u3002";
     return `\u5DF2\u9001\u8FBE\u4F1A\u8BDD ${session2.id}\uFF08${session2.name ?? "\u672A\u547D\u540D"}\uFF09\u3002${when}`;
   }
   async resume(args) {
@@ -22479,6 +22582,47 @@ ${usage.lines.join("\n")}
 \u6CE8\u610F\uFF1A\u7EED\u8DD1\u540E\u7684\u4F1A\u8BDD id \u53D8\u6210\u4E86 ${id}\u3002`;
     return `\u4F1A\u8BDD ${session2.id} \u7684\u8FDB\u7A0B\u5DF2\u9000\u51FA\uFF0C\u5DF2\u5728\u540E\u53F0\u7EED\u8DD1${message ? "\u5E76\u5E26\u4E0A\u4E86\u4F60\u7684\u6D88\u606F" : ""}\u3002\u5F53\u524D id\uFF1A${id}${changed}`;
   }
+  // ---- permission prompts and questions
+  async pending(args) {
+    const config2 = loadConfig();
+    const names = args.worker ? [pickWorker(config2, args.worker)[0]] : Object.keys(config2.workers);
+    const blocks = await Promise.all(
+      names.map(async (name) => {
+        try {
+          return (await this.resolve(name).node.pendingRequests()).map(requestMessage);
+        } catch (error2) {
+          return [`worker\u300C${name}\u300D\uFF1A\u65E0\u6CD5\u67E5\u8BE2\uFF08${errorText(error2, 200)}\uFF09`];
+        }
+      })
+    );
+    const all = blocks.flat();
+    return all.length ? all.join("\n\n---\n\n") : "\u6CA1\u6709\u7B49\u5F85\u7B54\u590D\u7684\u6743\u9650\u8BF7\u6C42\u6216\u63D0\u95EE\u3002";
+  }
+  async answer(args) {
+    const { node } = this.resolve(args.worker);
+    const id = args.request_id.trim().replace(/^#/, "");
+    if (node.config.approval === "user" && !args.user_confirmed) {
+      throw new ToolError(
+        `\u6CA1\u6709\u7B54\u590D\uFF1A\u8282\u70B9\u300C${node.name}\u300D\u914D\u7F6E\u4E3A\u7531\u7528\u6237\u51B3\u5B9A\uFF08approval: "user"\uFF09\u3002\u5148\u628A\u8BF7\u6C42 #${id} \u544A\u8BC9\u7528\u6237\uFF0C\u62FF\u5230\u7B54\u590D\u540E\u5E26\u4E0A user_confirmed=true \u518D\u8C03\u7528\u3002`
+      );
+    }
+    let answer;
+    if (args.answers?.length && args.decision) {
+      throw new ToolError("decision \u548C answers \u53EA\u80FD\u7ED9\u4E00\u4E2A\uFF1A\u6743\u9650\u8BF7\u6C42\u7528 decision\uFF0C\u63D0\u95EE\u7528 answers\u3002");
+    } else if (args.answers?.length) {
+      answer = { kind: "question", answers: args.answers };
+    } else if (args.decision) {
+      answer = { kind: "permission", decision: args.decision, message: args.message, remember: args.remember };
+    } else {
+      throw new ToolError('\u8BF7\u7ED9\u51FA\u7B54\u590D\uFF1A\u6743\u9650\u8BF7\u6C42\u7528 decision="allow" \u6216 "deny"\uFF0C\u63D0\u95EE\u7528 answers\u3002');
+    }
+    const request = await node.answerRequest(id, answer);
+    const target = `worker\u300C${node.name}\u300D\u4F1A\u8BDD\u300C${request.session}\u300D`;
+    if (answer.kind === "question") return `\u5DF2\u628A\u7B54\u6848\u4EA4\u7ED9${target}\uFF0C\u5B83\u4F1A\u63A5\u7740\u5DE5\u4F5C\u3002`;
+    if (answer.decision === "deny") return `\u5DF2\u62D2\u7EDD${target}\u7684\u8BF7\u6C42 #${id}\uFF0C\u5B83\u4F1A\u6536\u5230\u62D2\u7EDD\u7406\u7531\u3002`;
+    const remembered = answer.remember ? rememberable(request.suggestions).length ? "\u672C\u4F1A\u8BDD\u5185\u540C\u7C7B\u64CD\u4F5C\u4E0D\u518D\u8BE2\u95EE\u3002" : "\u8FD9\u4E2A\u8BF7\u6C42\u6CA1\u6709\u53EF\u8BB0\u4F4F\u7684\u89C4\u5219\uFF0C\u4E0B\u6B21\u540C\u7C7B\u64CD\u4F5C\u4ECD\u4F1A\u8BE2\u95EE\u3002" : "";
+    return `\u5DF2\u6279\u51C6${target}\u7684\u8BF7\u6C42 #${id}\uFF0C\u5B83\u4F1A\u63A5\u7740\u5DE5\u4F5C\u3002${remembered}`;
+  }
   // ---- status, stop, list
   async status(args) {
     const { node } = this.resolve(args.worker);
@@ -22506,11 +22650,12 @@ ${lines.join("\n")}`;
       Object.keys(config2.workers).map(async (name) => {
         try {
           const { node } = this.resolve(name);
-          const sessions = await node.sessions();
+          const [sessions, pending] = await Promise.all([node.sessions(), node.pendingRequests().catch(() => [])]);
+          const waiting = pending.length ? `\uFF0C${pending.length} \u4E2A\u8BF7\u6C42\u7B49\u5F85\u7B54\u590D\uFF08\u7528 worker_pending \u67E5\u770B\uFF09` : "";
           const link = this.channels.isOpen(name) ? "\u901A\u9053\u5DF2\u8FDE\u63A5" : "\u901A\u9053\u672A\u8FDE\u63A5\uFF08\u6D3E\u53D1\u6216\u53D1\u6D88\u606F\u65F6\u81EA\u52A8\u5EFA\u7ACB\uFF09";
           const lines = [...this.describePreparing(name), ...sessions.map(describeSession)];
           const body = lines.length ? indent(lines) : "  \uFF08\u6CA1\u6709\u540E\u53F0\u4F1A\u8BDD\uFF09";
-          return `${name}\uFF08ssh: ${node.config.ssh}\uFF0C${link}\uFF09
+          return `${name}\uFF08ssh: ${node.config.ssh}\uFF0C${link}${waiting}\uFF09
 ${body}`;
         } catch (error2) {
           return `${name}\uFF1A\u65E0\u6CD5\u67E5\u8BE2\uFF08${errorText(error2, 200)}\uFF09`;
@@ -22585,13 +22730,16 @@ ${indent(usage.lines)}${low}`;
       }
     }
     rows.push(`\u6743\u9650\u6A21\u5F0F\u9ED8\u8BA4\u503C\uFF1A${node.config.permissionMode}`);
+    rows.push(
+      `\u6743\u9650\u8BF7\u6C42\u548C\u63D0\u95EE\uFF1A${node.config.approval === "user" ? "\u5FC5\u987B\u95EE\u7528\u6237" : "\u4E3B\u8282\u70B9\u53EF\u81EA\u884C\u51B3\u5B9A"}\uFF0C${node.config.approvalTimeout ? `\u7B49\u5F85\u4E0A\u9650 ${node.config.approvalTimeout} \u79D2` : "\u4E00\u76F4\u7B49\u5230\u7B54\u590D"}`
+    );
     return `\u8282\u70B9\u300C${node.name}\u300D\u81EA\u68C0\uFF1A
 ${rows.join("\n")}`;
   }
 };
 
 // src/master/main.ts
-var INSTRUCTIONS = "agent-remote-worker\uFF1A\u628A\u4EFB\u52A1\u6D3E\u7ED9\u5176\u4ED6\u673A\u5668\u4E0A\u7684 Claude Code \u4F1A\u8BDD\uFF08remote worker\uFF09\uFF0C\u5B83\u4EEC\u7528\u7684\u662F\u53E6\u4E00\u4E2A\u8D26\u53F7\u7684\u989D\u5EA6\u3002\u548C\u5185\u7F6E Sub Agent \u4E0D\u540C\uFF1Aworker \u5728\u53E6\u4E00\u53F0\u673A\u5668\u3001\u53E6\u4E00\u4E2A\u8D26\u53F7\u3001\u72EC\u7ACB\u7684\u4EE3\u7801\u526F\u672C\u4E0A\u8FD0\u884C\uFF0C\u770B\u4E0D\u5230\u672C\u4F1A\u8BDD\u7684\u4E0A\u4E0B\u6587\u548C\u6587\u4EF6\uFF0C\u6240\u4EE5 worker_dispatch \u7684 task \u5FC5\u987B\u81EA\u5305\u542B\uFF08\u76EE\u6807\u3001\u8FB9\u754C\u3001\u9A8C\u6536\u6807\u51C6\uFF09\u3002\u4EE3\u7801\u901A\u8FC7 Git \u8FDC\u7AEF\u540C\u6B65\uFF1A\u6D3E\u53D1\u524D\u672C\u673A\u4EE3\u7801\u8981\u5DF2\u63D0\u4EA4\u5E76\u63A8\u9001\uFF0Cworker \u9ED8\u8BA4\u628A\u7ED3\u679C\u63A8\u56DE\u672C\u673A\u5F53\u524D\u6240\u5728\u7684\u5206\u652F\uFF0C\u7531\u4F60 git pull \u540E\u5BA1\u67E5\u3002worker \u7684\u63D0\u95EE\u7531\u4F60\u56DE\u7B54\uFF1A\u4EFB\u52A1\u8303\u56F4\u5185\u4F60\u80FD\u5B9A\u7684\u76F4\u63A5\u56DE\u590D\uFF0C\u9700\u6C42\u53D6\u820D\u3001\u6709\u98CE\u9669\u6216\u4E0D\u53EF\u9006\u7684\u64CD\u4F5C\u3001\u8D85\u51FA\u539F\u4EFB\u52A1\u8303\u56F4\u7684\u4E8B\u5148\u95EE\u7528\u6237\u3002\u7528\u6237\u8981\u6C42\u6D3E\u7ED9 worker \u65F6\u624D\u6D3E\u53D1\u3002\u6D3E\u53D1\u540E\u4E0D\u9700\u8981\u8F6E\u8BE2\uFF1Aworker \u7684\u6C47\u62A5\u548C\u63D0\u95EE\u4F1A\u4F5C\u4E3A\u4EE5 [agent-remote-worker] \u5F00\u5934\u7684\u6D88\u606F\u81EA\u52A8\u51FA\u73B0\uFF0C\u7528 worker_send \u56DE\u590D\u3002\u6D3E\u53D1\u524D\u4F1A\u81EA\u52A8\u68C0\u67E5 worker \u7684\u989D\u5EA6\u3002\u8BE6\u7EC6\u505A\u6CD5\u89C1 agent-remote-worker:dispatch skill\u3002";
+var INSTRUCTIONS = "agent-remote-worker\uFF1A\u628A\u4EFB\u52A1\u6D3E\u7ED9\u5176\u4ED6\u673A\u5668\u4E0A\u7684 Claude Code \u4F1A\u8BDD\uFF08remote worker\uFF09\uFF0C\u5B83\u4EEC\u7528\u7684\u662F\u53E6\u4E00\u4E2A\u8D26\u53F7\u7684\u989D\u5EA6\u3002\u548C\u5185\u7F6E Sub Agent \u4E0D\u540C\uFF1Aworker \u5728\u53E6\u4E00\u53F0\u673A\u5668\u3001\u53E6\u4E00\u4E2A\u8D26\u53F7\u3001\u72EC\u7ACB\u7684\u4EE3\u7801\u526F\u672C\u4E0A\u8FD0\u884C\uFF0C\u770B\u4E0D\u5230\u672C\u4F1A\u8BDD\u7684\u4E0A\u4E0B\u6587\u548C\u6587\u4EF6\uFF0C\u6240\u4EE5 worker_dispatch \u7684 task \u5FC5\u987B\u81EA\u5305\u542B\uFF08\u76EE\u6807\u3001\u8FB9\u754C\u3001\u9A8C\u6536\u6807\u51C6\uFF09\u3002\u4EE3\u7801\u901A\u8FC7 Git \u8FDC\u7AEF\u540C\u6B65\uFF1A\u6D3E\u53D1\u524D\u672C\u673A\u4EE3\u7801\u8981\u5DF2\u63D0\u4EA4\u5E76\u63A8\u9001\uFF0Cworker \u9ED8\u8BA4\u628A\u7ED3\u679C\u63A8\u56DE\u672C\u673A\u5F53\u524D\u6240\u5728\u7684\u5206\u652F\uFF0C\u7531\u4F60 git pull \u540E\u5BA1\u67E5\u3002worker \u7684\u6743\u9650\u8BF7\u6C42\u548C\u63D0\u95EE\u4F1A\u8F6C\u7ED9\u4F60\uFF0Cworker \u5728\u539F\u5730\u7B49\u5F85\uFF1A\u7528 worker_answer \u6309\u7F16\u53F7\u7B54\u590D\u3002\u4EFB\u52A1\u8303\u56F4\u5185\u4F60\u80FD\u5B9A\u7684\u76F4\u63A5\u7B54\u590D\uFF0C\u9700\u6C42\u53D6\u820D\u3001\u6709\u98CE\u9669\u6216\u4E0D\u53EF\u9006\u7684\u64CD\u4F5C\u3001\u8D85\u51FA\u539F\u4EFB\u52A1\u8303\u56F4\u7684\u4E8B\u5148\u95EE\u7528\u6237\u3002\u7528\u6237\u8981\u6C42\u6D3E\u7ED9 worker \u65F6\u624D\u6D3E\u53D1\u3002\u6D3E\u53D1\u540E\u4E0D\u9700\u8981\u8F6E\u8BE2\uFF1Aworker \u7684\u6C47\u62A5\u548C\u63D0\u95EE\u4F1A\u4F5C\u4E3A\u4EE5 [agent-remote-worker] \u5F00\u5934\u7684\u6D88\u606F\u81EA\u52A8\u51FA\u73B0\uFF0C\u7528 worker_send \u56DE\u590D\u3002\u6D3E\u53D1\u524D\u4F1A\u81EA\u52A8\u68C0\u67E5 worker \u7684\u989D\u5EA6\u3002\u8BE6\u7EC6\u505A\u6CD5\u89C1 agent-remote-worker:dispatch skill\u3002";
 var worker = external_exports.string().optional().describe("\u8282\u70B9\u540D\uFF08workers.json \u91CC\u7684\u952E\uFF09\uFF1B\u53EA\u6709\u4E00\u4E2A\u8282\u70B9\u65F6\u53EF\u7701\u7565");
 var session = external_exports.string().describe("\u4F1A\u8BDD id \u6216\u540D\u5B57");
 var permissionMode = external_exports.enum(PERMISSION_MODES).optional().describe("\u8986\u76D6\u8282\u70B9\u9ED8\u8BA4\u7684\u6743\u9650\u6A21\u5F0F");
@@ -22622,6 +22770,30 @@ server.registerTool(
     inputSchema: { worker, session, message: external_exports.string() }
   },
   textTool((args) => master.send(args))
+);
+server.registerTool(
+  "worker_answer",
+  {
+    description: "\u7B54\u590D worker \u4F1A\u8BDD\u6B63\u5728\u7B49\u5F85\u7684\u4E00\u4E2A\u6743\u9650\u8BF7\u6C42\u6216\u63D0\u95EE\uFF08\u6D88\u606F\u91CC\u7684 #\u7F16\u53F7\uFF09\u3002\u6743\u9650\u8BF7\u6C42\u7ED9 decision\uFF0C\u63D0\u95EE\u7ED9 answers\uFF1Bworker \u6536\u5230\u540E\u5F53\u573A\u7EE7\u7EED\u3002\u9700\u6C42\u53D6\u820D\u3001\u6709\u98CE\u9669\u6216\u4E0D\u53EF\u9006\u7684\u64CD\u4F5C\u3001\u8D85\u51FA\u539F\u4EFB\u52A1\u8303\u56F4\u7684\u4E8B\uFF0C\u5148\u95EE\u7528\u6237\u518D\u7B54\u590D\u3002",
+    inputSchema: {
+      worker,
+      request_id: external_exports.string().describe("\u8BF7\u6C42\u7F16\u53F7\uFF0C\u5373\u6D88\u606F\u91CC # \u540E\u9762\u7684\u90E8\u5206"),
+      decision: external_exports.enum(["allow", "deny"]).optional().describe("\u6743\u9650\u8BF7\u6C42\uFF1Aallow \u653E\u884C\uFF0Cdeny \u62D2\u7EDD"),
+      message: external_exports.string().optional().describe("\u62D2\u7EDD\u65F6\u544A\u8BC9 worker \u7684\u7406\u7531\u6216\u66FF\u4EE3\u505A\u6CD5"),
+      remember: external_exports.boolean().optional().describe("\u653E\u884C\u65F6\uFF0C\u672C\u4F1A\u8BDD\u5185\u540C\u7C7B\u64CD\u4F5C\u4E0D\u518D\u8BE2\u95EE"),
+      answers: external_exports.array(external_exports.string()).optional().describe("\u63D0\u95EE\uFF1A\u6309\u95EE\u9898\u987A\u5E8F\uFF0C\u6BCF\u4E2A\u95EE\u9898\u4E00\u4E2A\u7B54\u6848\uFF08\u9009\u9879\u6807\u7B7E\u6216\u81EA\u7531\u6587\u672C\uFF0C\u591A\u9009\u7528\u9017\u53F7\u5206\u9694\uFF09"),
+      user_confirmed: external_exports.boolean().optional().describe("\u8FD9\u4E2A\u7B54\u590D\u5DF2\u7ECF\u95EE\u8FC7\u7528\u6237\uFF1B\u8282\u70B9\u914D\u7F6E\u4E3A approval=user \u65F6\u5FC5\u987B\u4E3A true")
+    }
+  },
+  textTool((args) => master.answer(args))
+);
+server.registerTool(
+  "worker_pending",
+  {
+    description: "\u5217\u51FA worker \u4F1A\u8BDD\u6B63\u5728\u7B49\u5F85\u7B54\u590D\u7684\u6743\u9650\u8BF7\u6C42\u548C\u63D0\u95EE\u3002\u901A\u9053\u65AD\u8FC7\u3001\u6216\u60F3\u786E\u8BA4\u6709\u6CA1\u6709\u6F0F\u6389\u7684\u8BF7\u6C42\u65F6\u4F7F\u7528\u3002",
+    inputSchema: { worker }
+  },
+  textTool((args) => master.pending(args))
 );
 server.registerTool(
   "worker_status",

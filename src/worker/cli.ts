@@ -4,7 +4,29 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { postToInbox, sessionInbox } from "../shared/inbox.ts";
-import { QUESTION_FORWARDED, QUESTION_NOT_FORWARDED, workerMessage } from "../shared/protocol.ts";
+import {
+  PERMISSION_NOT_FORWARDED,
+  PERMISSION_TIMED_OUT,
+  autoDeniedMessage,
+  QUESTION_NOT_FORWARDED,
+  QUESTION_TIMED_OUT,
+  permissionDenied,
+  questionTexts,
+  rememberable,
+  requestMessage,
+  type PendingRequest,
+  type RequestAnswer,
+} from "../shared/protocol.ts";
+import {
+  RequestError,
+  answerRequest,
+  listPending,
+  newRequestId,
+  removeRequest,
+  requestsDir,
+  savePending,
+  waitForAnswer,
+} from "./requests.ts";
 import { TrustError, isTrusted, trustWorkRoot } from "./trust.ts";
 import { WorkspaceError, prepareWorkspace, removeWorkspace } from "./workspace.ts";
 
@@ -98,47 +120,122 @@ async function workspace(action: "add" | "remove"): Promise<number> {
   }
 }
 
-interface AskUserQuestionInput {
-  questions?: Array<{ question?: string; options?: Array<{ label?: string; description?: string }> }>;
+/** What a PermissionRequest hook prints for the master's answer, or for none. */
+export function permissionOutput(request: PendingRequest, answer: RequestAnswer | undefined, fallback: string) {
+  let decision: Record<string, unknown>;
+  if (answer?.kind === "permission" && answer.decision === "allow") {
+    const rules = answer.remember ? rememberable(request.suggestions) : [];
+    decision = {
+      behavior: "allow",
+      // "Don't ask again" for the rest of this session only, never written to settings files.
+      ...(rules.length ? { updatedPermissions: rules.map((entry) => ({ ...entry, destination: "session" })) } : {}),
+    };
+  } else if (answer?.kind === "permission") {
+    decision = { behavior: "deny", message: permissionDenied(answer.message) };
+  } else {
+    decision = { behavior: "deny", message: fallback };
+  }
+  return { hookSpecificOutput: { hookEventName: "PermissionRequest", decision } };
 }
 
-/** Renders the built-in question tool's input as text the master can answer. */
-export function formatQuestions(input: AskUserQuestionInput): string {
-  const questions = input.questions ?? [];
-  return questions
-    .map((q, index) => {
-      const options = (q.options ?? [])
-        .map((option) => `  - ${option.label ?? ""}${option.description ? `：${option.description}` : ""}`)
-        .join("\n");
-      const title = questions.length > 1 ? `问题 ${index + 1}：${q.question ?? ""}` : (q.question ?? "");
-      return options ? `${title}\n${options}` : title;
-    })
-    .join("\n\n");
+/** What the AskUserQuestion PreToolUse hook prints: the tool runs with the master's answers, or is refused. */
+export function questionOutput(request: PendingRequest, answer: RequestAnswer | undefined, fallback: string) {
+  if (answer?.kind === "question") {
+    const answers = Object.fromEntries(questionTexts(request.toolInput).map((text, i) => [text, answer.answers[i] ?? ""]));
+    return {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "allow",
+        updatedInput: { ...request.toolInput, answers },
+      },
+    };
+  }
+  return {
+    hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: fallback },
+  };
 }
 
 /**
- * hook-ask <socket> <worker> <session>: a PreToolUse hook for AskUserQuestion.
- * Nobody sits at a worker session, so the question goes to the master instead
- * and the tool call is refused with what to do next.
+ * hook-permission / hook-ask <socket> <worker> <session> <timeout-seconds> <approval>
+ *
+ * Nobody sits at a worker session, so its permission prompts and questions go
+ * to the master: the hook files the request, tells the master, and holds the
+ * session until the master answers or the time runs out.
  */
-async function hookAsk([socket, worker, session]: string[]): Promise<number> {
-  let reason = QUESTION_FORWARDED;
-  try {
-    const input = JSON.parse(await readStdin()).tool_input as AskUserQuestionInput;
-    await postToInbox(socket ?? "", workerMessage(worker ?? "worker", session ?? "?", "question", formatQuestions(input)));
-  } catch {
-    reason = QUESTION_NOT_FORWARDED;
+async function hookRequest(kind: "permission" | "question", args: string[]): Promise<number> {
+  const [socket = "", worker = "worker", session = "?", timeoutArg, approvalArg] = args;
+  const input = JSON.parse(await readStdin());
+  const timeoutMs = Math.max(0, Number(timeoutArg) || 0) * 1000; // 0: wait until answered
+  const dir = requestsDir();
+  const request: PendingRequest = {
+    id: newRequestId(),
+    kind,
+    worker,
+    session,
+    pid: process.pid,
+    createdAt: Date.now(),
+    deadline: timeoutMs ? Date.now() + timeoutMs : 0,
+    approval: approvalArg === "user" ? "user" : "master",
+    toolName: String(input.tool_name ?? (kind === "question" ? "AskUserQuestion" : "?")),
+    toolInput: (input.tool_input ?? {}) as Record<string, unknown>,
+    ...(Array.isArray(input.permission_suggestions) ? { suggestions: input.permission_suggestions } : {}),
+  };
+  const output = kind === "permission" ? permissionOutput : questionOutput;
+  const cleanUp = () => removeRequest(dir, request.id);
+  for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
+    process.once(signal, () => {
+      cleanUp();
+      process.exit(1);
+    });
   }
-  console.log(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse",
-        permissionDecision: "deny",
-        permissionDecisionReason: reason,
-      },
-    }),
-  );
+
+  try {
+    savePending(dir, request);
+    await postToInbox(socket, requestMessage(request));
+  } catch {
+    cleanUp();
+    console.log(JSON.stringify(output(request, undefined, kind === "permission" ? PERMISSION_NOT_FORWARDED : QUESTION_NOT_FORWARDED)));
+    return 0;
+  }
+  const answer = await waitForAnswer(dir, request);
+  cleanUp();
+  console.log(JSON.stringify(output(request, answer, kind === "permission" ? PERMISSION_TIMED_OUT : QUESTION_TIMED_OUT)));
   return 0;
+}
+
+/**
+ * hook-denied <socket> <worker> <session>: a PermissionDenied hook. Auto mode
+ * refused a call without asking anyone; tell the master. The refusal stands.
+ */
+async function hookDenied([socket = "", worker = "worker", session = "?"]: string[]): Promise<number> {
+  try {
+    const input = JSON.parse(await readStdin());
+    await postToInbox(
+      socket,
+      autoDeniedMessage(worker, session, String(input.tool_name ?? "?"), (input.tool_input ?? {}) as Record<string, unknown>, String(input.reason ?? "")),
+    );
+  } catch {
+    // The master is out of reach: the worker still sees the refusal and can report it later.
+  }
+  return 0;
+}
+
+/** pending: the requests on this machine still waiting for the master, as JSON. */
+function pending(): number {
+  console.log(JSON.stringify(listPending(requestsDir())));
+  return 0;
+}
+
+/** answer <id>: hand the master's answer (JSON on stdin) to the hook waiting on that request. */
+async function answer(id: string | undefined): Promise<number> {
+  try {
+    const request = answerRequest(requestsDir(), id ?? "", JSON.parse(await readStdin()) as RequestAnswer);
+    console.log(JSON.stringify(request));
+    return 0;
+  } catch (error) {
+    console.error(error instanceof RequestError ? error.message : String(error));
+    return 5;
+  }
 }
 
 export async function runCli(command: string | undefined, args: string[]): Promise<number> {
@@ -148,7 +245,15 @@ export async function runCli(command: string | undefined, args: string[]): Promi
     case "workspace-remove":
       return workspace("remove");
     case "hook-ask":
-      return hookAsk(args);
+      return hookRequest("question", args);
+    case "hook-denied":
+      return hookDenied(args);
+    case "hook-permission":
+      return hookRequest("permission", args);
+    case "pending":
+      return pending();
+    case "answer":
+      return answer(args[0]);
     case "post":
       return post(args[0]);
     case "prep":
@@ -158,7 +263,7 @@ export async function runCli(command: string | undefined, args: string[]): Promi
     case "trust-root":
       return trustRoot(args[0]);
     default:
-      console.error("usage: worker.js serve | post <pid> | prep <master-id> | trust <dir>");
+      console.error("usage: worker.js serve | post <pid> | prep <master-id> | trust <dir> | pending | answer <id>");
       return 2;
   }
 }

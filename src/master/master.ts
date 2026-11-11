@@ -6,9 +6,12 @@ import {
   RECONNECT_NOTICE,
   WORKER_PREFIX,
   masterMessage,
+  rememberable,
+  requestMessage,
   taskBrief,
   type CodeBase,
   type PermissionMode,
+  type RequestAnswer,
 } from "../shared/protocol.ts";
 import { ToolError, errorText } from "../shared/tooling.ts";
 import type { PrepResult } from "../worker/cli.ts";
@@ -78,6 +81,14 @@ export class Master {
   }
 
   private async askToReport(node: WorkerNode): Promise<void> {
+    // Requests raised while the channel was down never reached this session; a restarted one forgot them.
+    const pending = await node.pendingRequests().catch(() => []);
+    if (pending.length) {
+      await this.notify(
+        `${WORKER_PREFIX} 和 worker「${node.name}」的通道刚刚恢复，下面 ${pending.length} 个请求仍在等待答复：\n\n` +
+          pending.map(requestMessage).join("\n\n---\n\n"),
+      );
+    }
     const names = this.dispatched.get(node.name);
     if (!names?.size) return;
     for (const session of await node.sessions(false)) {
@@ -284,7 +295,7 @@ export class Master {
       session.status === "busy"
         ? "它正在工作，会在当前工具调用结束后读到。"
         : session.status === "waiting"
-          ? `它正卡在「${session.waitingFor ?? "等待输入"}」上，消息已排队，要等那个确认被处理后才会读到。`
+          ? `它正卡在「${session.waitingFor ?? "等待输入"}」上，消息已排队，要等那个确认被处理后才会读到。如果是在等你答复权限请求或提问，用 worker_pending 查看并用 worker_answer 答复。`
           : "它处于空闲，已被唤醒。";
     return `已送达会话 ${session.id}（${session.name ?? "未命名"}）。${when}`;
   }
@@ -322,6 +333,62 @@ export class Master {
     return `会话 ${session.id} 的进程已退出，已在后台续跑${message ? "并带上了你的消息" : ""}。当前 id：${id}${changed}`;
   }
 
+  // ---- permission prompts and questions
+
+  async pending(args: { worker?: string }): Promise<string> {
+    const config = loadConfig();
+    const names = args.worker ? [pickWorker(config, args.worker)[0]] : Object.keys(config.workers);
+    const blocks = await Promise.all(
+      names.map(async (name) => {
+        try {
+          return (await this.resolve(name).node.pendingRequests()).map(requestMessage);
+        } catch (error) {
+          return [`worker「${name}」：无法查询（${errorText(error, 200)}）`];
+        }
+      }),
+    );
+    const all = blocks.flat();
+    return all.length ? all.join("\n\n---\n\n") : "没有等待答复的权限请求或提问。";
+  }
+
+  async answer(args: {
+    worker?: string;
+    request_id: string;
+    decision?: "allow" | "deny";
+    message?: string;
+    remember?: boolean;
+    answers?: string[];
+    user_confirmed?: boolean;
+  }): Promise<string> {
+    const { node } = this.resolve(args.worker);
+    const id = args.request_id.trim().replace(/^#/, "");
+    if (node.config.approval === "user" && !args.user_confirmed) {
+      throw new ToolError(
+        `没有答复：节点「${node.name}」配置为由用户决定（approval: "user"）。先把请求 #${id} 告诉用户，拿到答复后带上 user_confirmed=true 再调用。`,
+      );
+    }
+    let answer: RequestAnswer;
+    if (args.answers?.length && args.decision) {
+      throw new ToolError("decision 和 answers 只能给一个：权限请求用 decision，提问用 answers。");
+    } else if (args.answers?.length) {
+      answer = { kind: "question", answers: args.answers };
+    } else if (args.decision) {
+      answer = { kind: "permission", decision: args.decision, message: args.message, remember: args.remember };
+    } else {
+      throw new ToolError("请给出答复：权限请求用 decision=\"allow\" 或 \"deny\"，提问用 answers。");
+    }
+    const request = await node.answerRequest(id, answer);
+    const target = `worker「${node.name}」会话「${request.session}」`;
+    if (answer.kind === "question") return `已把答案交给${target}，它会接着工作。`;
+    if (answer.decision === "deny") return `已拒绝${target}的请求 #${id}，它会收到拒绝理由。`;
+    const remembered = answer.remember
+      ? rememberable(request.suggestions).length
+        ? "本会话内同类操作不再询问。"
+        : "这个请求没有可记住的规则，下次同类操作仍会询问。"
+      : "";
+    return `已批准${target}的请求 #${id}，它会接着工作。${remembered}`;
+  }
+
   // ---- status, stop, list
 
   async status(args: { worker?: string; session?: string }): Promise<string> {
@@ -350,11 +417,12 @@ export class Master {
       Object.keys(config.workers).map(async (name) => {
         try {
           const { node } = this.resolve(name);
-          const sessions = await node.sessions();
+          const [sessions, pending] = await Promise.all([node.sessions(), node.pendingRequests().catch(() => [])]);
+          const waiting = pending.length ? `，${pending.length} 个请求等待答复（用 worker_pending 查看）` : "";
           const link = this.channels.isOpen(name) ? "通道已连接" : "通道未连接（派发或发消息时自动建立）";
           const lines = [...this.describePreparing(name), ...sessions.map(describeSession)];
           const body = lines.length ? indent(lines) : "  （没有后台会话）";
-          return `${name}（ssh: ${node.config.ssh}，${link}）\n${body}`;
+          return `${name}（ssh: ${node.config.ssh}，${link}${waiting}）\n${body}`;
         } catch (error) {
           return `${name}：无法查询（${errorText(error, 200)}）`;
         }
@@ -437,6 +505,9 @@ export class Master {
       }
     }
     rows.push(`权限模式默认值：${node.config.permissionMode}`);
+    rows.push(
+      `权限请求和提问：${node.config.approval === "user" ? "必须问用户" : "主节点可自行决定"}，${node.config.approvalTimeout ? `等待上限 ${node.config.approvalTimeout} 秒` : "一直等到答复"}`,
+    );
     return `节点「${node.name}」自检：\n${rows.join("\n")}`;
   }
 }

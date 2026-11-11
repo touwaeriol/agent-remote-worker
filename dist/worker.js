@@ -3262,8 +3262,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path5) {
-      let input = path5;
+    function removeDotSegments(path6) {
+      let input = path6;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3337,11 +3337,11 @@ var require_utils = __commonJS({
       }
       return output.join("");
     }
-    function removeDotSegmentsRelative(path5) {
-      if (path5 === "" || path5[0] === "/") {
-        return removeDotSegments(path5);
+    function removeDotSegmentsRelative(path6) {
+      if (path6 === "" || path6[0] === "/") {
+        return removeDotSegments(path6);
       }
-      const segments = path5.split("/");
+      const segments = path6.split("/");
       const last = segments.length - 1;
       const output = [];
       let trailingDirectory = false;
@@ -3704,8 +3704,8 @@ var require_schemes = __commonJS({
       }
       if (wsComponent.resourceName) {
         const queryIndex = wsComponent.resourceName.indexOf("?");
-        const path5 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
-        wsComponent.path = path5 && path5 !== "/" ? path5 : void 0;
+        const path6 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
+        wsComponent.path = path6 && path6 !== "/" ? path6 : void 0;
         wsComponent.query = queryIndex === -1 ? void 0 : wsComponent.resourceName.slice(queryIndex + 1);
         wsComponent.resourceName = void 0;
       }
@@ -7242,12 +7242,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs5, exportName) {
+    function addFormats(ajv, list, fs6, exportName) {
       var _a;
       var _b;
       (_a = (_b = ajv.opts.code).formats) !== null && _a !== void 0 ? _a : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs5[f]);
+        ajv.addFormat(f, fs6[f]);
     }
     module.exports = exports = formatsPlugin;
     Object.defineProperty(exports, "__esModule", { value: true });
@@ -7256,9 +7256,9 @@ var require_dist = __commonJS({
 });
 
 // src/worker/cli.ts
-import fs4 from "node:fs";
-import os4 from "node:os";
-import path4 from "node:path";
+import fs5 from "node:fs";
+import os5 from "node:os";
+import path5 from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/shared/inbox.ts
@@ -7323,26 +7323,167 @@ ${body.trim()}
 
 \uFF08\u56DE\u590D\u6216\u8FFD\u52A0\u6307\u4EE4\uFF1Aworker_send(worker="${worker}", session="${session}", message=...)\uFF09`;
 }
+function autoDeniedMessage(worker, session, toolName, input, reason) {
+  return `${WORKER_PREFIX} worker\u300C${worker}\u300D\u4F1A\u8BDD\u300C${session}\u300D\u7684\u4E00\u4E2A\u64CD\u4F5C\u88AB auto \u6A21\u5F0F\u76F4\u63A5\u62D2\u7EDD\u4E86\uFF08\u6CA1\u6709\u7ECF\u8FC7\u4F60\uFF0C\u4E5F\u65E0\u6CD5\u4E8B\u540E\u653E\u884C\uFF09\uFF1A
+${describeToolCall(toolName, input)}
+\u539F\u56E0\uFF1A${reason || "\u672A\u8BF4\u660E"}
+
+\uFF08worker \u4F1A\u81EA\u5DF1\u6362\u505A\u6CD5\u6216\u5411\u4F60\u6C47\u62A5\u3002\u9700\u8981\u7ED9\u5B83\u6307\u793A\u7528 worker_send(worker="${worker}", session="${session}", message=...)\uFF1B\u786E\u5B9E\u9700\u8981\u8FD9\u4E2A\u64CD\u4F5C\u65F6\uFF0C\u544A\u8BC9\u7528\u6237\uFF0C\u7528\u6237\u540C\u610F\u540E\u7528 worker_stop \u518D\u4EE5 permission_mode="default" \u6267\u884C worker_resume\uFF0C\u4E4B\u540E\u8FD9\u7C7B\u64CD\u4F5C\u4F1A\u4EA4\u7ED9\u4F60\u6279\u51C6\u3002\uFF09`;
+}
 function masterMessage(body) {
   return `${MASTER_PREFIX} ${body.trim()}`;
 }
-var QUESTION_FORWARDED = `\u8FD9\u4E2A\u95EE\u9898\u5DF2\u7ECF\u8F6C\u53D1\u7ED9\u4E3B\u8282\u70B9\uFF0C\u4E0D\u8981\u518D\u8C03\u7528 AskUserQuestion\u3002\u73B0\u5728\u7ED3\u675F\u8FD9\u4E00\u8F6E\u5E76\u7B49\u5F85\uFF1A\u4E3B\u8282\u70B9\u7684\u56DE\u590D\u4F1A\u4F5C\u4E3A\u4E00\u6761\u4EE5 ${MASTER_PREFIX} \u5F00\u5934\u7684\u6D88\u606F\u51FA\u73B0\u3002`;
+function formatQuestions(input) {
+  const questions = input.questions ?? [];
+  return questions.map((q, index) => {
+    const options = (q.options ?? []).map((option) => `  - ${option.label ?? ""}${option.description ? `\uFF1A${option.description}` : ""}`).join("\n");
+    const head = questions.length > 1 ? `\u95EE\u9898 ${index + 1}\uFF1A` : "";
+    const title = `${head}${q.question ?? ""}${q.multiSelect ? "\uFF08\u53EF\u591A\u9009\uFF09" : ""}`;
+    return options ? `${title}
+${options}` : title;
+  }).join("\n\n");
+}
+function questionTexts(input) {
+  return (input.questions ?? []).map((q) => q.question ?? "");
+}
+var clip = (text, limit) => text.length > limit ? `${text.slice(0, limit)}\u2026\uFF08\u5DF2\u622A\u65AD\uFF09` : text;
+function describeToolCall(toolName, input) {
+  if (toolName === "Bash" && typeof input.command === "string") {
+    const note = typeof input.description === "string" ? `
+\u8BF4\u660E\uFF1A${input.description}` : "";
+    return `\u5DE5\u5177\uFF1ABash
+\u547D\u4EE4\uFF1A${clip(input.command, 2e3)}${note}`;
+  }
+  return `\u5DE5\u5177\uFF1A${toolName}
+\u53C2\u6570\uFF1A${clip(JSON.stringify(input, null, 1), 2e3)}`;
+}
+function requestMessage(request) {
+  const { worker, session, id } = request;
+  const minutes = request.deadline ? Math.max(1, Math.round((request.deadline - Date.now()) / 6e4)) : 0;
+  const who = request.approval === "user" ? "\u8FD9\u4E2A\u8282\u70B9\u8981\u6C42\u6BCF\u4E2A\u8BF7\u6C42\u90FD\u5148\u95EE\u7528\u6237\uFF0C\u62FF\u5230\u7528\u6237\u7684\u7B54\u590D\u540E\u518D" : "\u4F60\u53EF\u4EE5\u81EA\u5DF1\u51B3\u5B9A\uFF0C\u4E5F\u53EF\u4EE5\u5148\u95EE\u7528\u6237\uFF0C\u7136\u540E";
+  if (request.kind === "permission") {
+    return `${WORKER_PREFIX} worker\u300C${worker}\u300D\u4F1A\u8BDD\u300C${session}\u300D\u7684\u6743\u9650\u8BF7\u6C42 #${id}\uFF0C\u5B83\u5728\u539F\u5730\u7B49\u5F85\u7B54\u590D\uFF1A
+${describeToolCall(request.toolName, request.toolInput)}
+
+\uFF08${who}\u7B54\u590D\uFF1Aworker_answer(worker="${worker}", request_id="${id}", decision="allow" \u6216 "deny", message=\u62D2\u7EDD\u65F6\u7684\u8BF4\u660E)\u3002` + (minutes ? `\u7EA6 ${minutes} \u5206\u949F\u5185\u6CA1\u6709\u7B54\u590D\u4F1A\u6309\u62D2\u7EDD\u5904\u7406\u3002\uFF09` : "\u5B83\u4F1A\u4E00\u76F4\u7B49\u5230\u4F60\u7B54\u590D\u3002\uFF09");
+  }
+  return `${WORKER_PREFIX} worker\u300C${worker}\u300D\u4F1A\u8BDD\u300C${session}\u300D\u7684\u63D0\u95EE #${id}\uFF0C\u5B83\u5728\u539F\u5730\u7B49\u5F85\u7B54\u590D\uFF1A
+${formatQuestions(request.toolInput)}
+
+\uFF08${who}\u7B54\u590D\uFF1Aworker_answer(worker="${worker}", request_id="${id}", answers=[\u6309\u95EE\u9898\u987A\u5E8F\uFF0C\u6BCF\u4E2A\u95EE\u9898\u4E00\u4E2A\u7B54\u6848\uFF0C\u53EF\u4EE5\u662F\u9009\u9879\u6807\u7B7E\u6216\u81EA\u7531\u6587\u672C\uFF1B\u591A\u9009\u7528\u9017\u53F7\u5206\u9694])\u3002` + (minutes ? `\u7EA6 ${minutes} \u5206\u949F\u5185\u6CA1\u6709\u7B54\u590D\uFF0Cworker \u4F1A\u7ED3\u675F\u8FD9\u4E00\u8F6E\uFF0C\u4E4B\u540E\u53EA\u80FD\u7528 worker_send \u56DE\u590D\u3002\uFF09` : "\u5B83\u4F1A\u4E00\u76F4\u7B49\u5230\u4F60\u7B54\u590D\u3002\uFF09");
+}
+function rememberable(suggestions) {
+  return (suggestions ?? []).filter(
+    (entry) => typeof entry === "object" && entry !== null && ["addRules", "addDirectories"].includes(String(entry.type))
+  );
+}
 var QUESTION_NOT_FORWARDED = "\u8FD9\u91CC\u6CA1\u6709\u7528\u6237\u53EF\u4EE5\u56DE\u7B54\uFF0C\u4E3B\u8282\u70B9\u5F53\u524D\u4E5F\u8054\u7CFB\u4E0D\u4E0A\u3002\u8BF7\u81EA\u884C\u505A\u51FA\u5408\u7406\u7684\u51B3\u5B9A\u5E76\u5728\u5B8C\u6210\u6C47\u62A5\u91CC\u8BF4\u660E\uFF0C\u6216\u7A0D\u540E\u7528 ask_master \u91CD\u8BD5\u3002";
+var QUESTION_TIMED_OUT = `\u4E3B\u8282\u70B9\u6CA1\u6709\u5728\u65F6\u9650\u5185\u56DE\u7B54\u8FD9\u4E2A\u95EE\u9898\u3002\u4E0D\u8981\u518D\u6B21\u8C03\u7528 AskUserQuestion\uFF1A\u7ED3\u675F\u8FD9\u4E00\u8F6E\u5E76\u7B49\u5F85\uFF0C\u4E3B\u8282\u70B9\u7684\u56DE\u590D\u4F1A\u4F5C\u4E3A\u4E00\u6761\u4EE5 ${MASTER_PREFIX} \u5F00\u5934\u7684\u6D88\u606F\u51FA\u73B0\u3002`;
+var PERMISSION_NOT_FORWARDED = '\u8FD9\u4E2A\u64CD\u4F5C\u9700\u8981\u786E\u8BA4\uFF0C\u4F46\u4E3B\u8282\u70B9\u5F53\u524D\u8054\u7CFB\u4E0D\u4E0A\uFF0C\u5DF2\u6309\u62D2\u7EDD\u5904\u7406\u3002\u4E0D\u8981\u6362\u7740\u6CD5\u5B50\u7ED5\u8FC7\uFF1A\u5148\u505A\u522B\u7684\u90E8\u5206\uFF0C\u6216\u7528 report_to_master(kind="blocked") \u8BF4\u660E\u9700\u8981\u4EC0\u4E48\uFF0C\u4E3B\u8282\u70B9\u91CD\u8FDE\u540E\u4F1A\u5904\u7406\u3002';
+var PERMISSION_TIMED_OUT = '\u4E3B\u8282\u70B9\u6CA1\u6709\u5728\u65F6\u9650\u5185\u6279\u51C6\u8FD9\u4E2A\u64CD\u4F5C\uFF0C\u5DF2\u6309\u62D2\u7EDD\u5904\u7406\u3002\u4E0D\u8981\u6362\u7740\u6CD5\u5B50\u7ED5\u8FC7\uFF1A\u7528 report_to_master(kind="blocked") \u8BF4\u660E\u662F\u54EA\u4E2A\u64CD\u4F5C\u3001\u4E3A\u4EC0\u4E48\u9700\u8981\u5B83\u3002';
+function permissionDenied(message) {
+  return `\u4E3B\u8282\u70B9\u62D2\u7EDD\u4E86\u8FD9\u4E2A\u64CD\u4F5C${message?.trim() ? `\uFF1A${message.trim()}` : "\u3002"}\u4E0D\u8981\u6362\u7740\u6CD5\u5B50\u7ED5\u8FC7\uFF1B\u6309\u4E3B\u8282\u70B9\u7684\u8BF4\u660E\u8C03\u6574\uFF0C\u786E\u5B9E\u9700\u8981\u65F6\u7528 report_to_master(kind="blocked") \u8BF4\u660E\u7406\u7531\u3002`;
+}
 var RECONNECT_NOTICE = masterMessage(
   "\u4E3B\u8282\u70B9\u521A\u521A\u91CD\u65B0\u8FDE\u4E0A\u3002\u5982\u679C\u4F60\u6709\u6CA1\u9001\u8FBE\u7684\u6C47\u62A5\u6216\u63D0\u95EE\uFF0C\u8BF7\u7528 report_to_master / ask_master \u91CD\u65B0\u53D1\u9001\u5F53\u524D\u72B6\u6001\u3002"
 );
 
-// src/worker/trust.ts
+// src/worker/requests.ts
+import { randomBytes } from "node:crypto";
 import fs2 from "node:fs";
 import os2 from "node:os";
 import path2 from "node:path";
+var RequestError = class extends Error {
+};
+function requestsDir() {
+  return process.env.CW_REQUESTS_DIR ?? path2.join(os2.homedir(), ".agent-remote-worker", "requests");
+}
+var ID = /^[0-9a-f]{4,16}$/;
+var pendingFile = (dir, id) => path2.join(dir, `${id}.json`);
+var answerFile = (dir, id) => path2.join(dir, `${id}.answer.json`);
+function newRequestId() {
+  return randomBytes(4).toString("hex");
+}
+function writeAtomic(file, data) {
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs2.writeFileSync(tmp, JSON.stringify(data), { mode: 384 });
+  fs2.renameSync(tmp, file);
+}
+function savePending(dir, request) {
+  fs2.mkdirSync(dir, { recursive: true, mode: 448 });
+  writeAtomic(pendingFile(dir, request.id), request);
+}
+function removeRequest(dir, id) {
+  fs2.rmSync(pendingFile(dir, id), { force: true });
+  fs2.rmSync(answerFile(dir, id), { force: true });
+}
+function isAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error2) {
+    return error2.code === "EPERM";
+  }
+}
+function readPending(dir, id) {
+  let request;
+  try {
+    request = JSON.parse(fs2.readFileSync(pendingFile(dir, id), "utf8"));
+  } catch {
+    return void 0;
+  }
+  if (!isAlive(request.pid) || request.deadline && request.deadline < Date.now()) {
+    removeRequest(dir, id);
+    return void 0;
+  }
+  return request;
+}
+function listPending(dir) {
+  let names;
+  try {
+    names = fs2.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  return names.map((name) => /^([0-9a-f]+)\.json$/.exec(name)?.[1]).filter((id) => id !== void 0).map((id) => readPending(dir, id)).filter((request) => request !== void 0).sort((a, b) => a.createdAt - b.createdAt);
+}
+function answerRequest(dir, id, answer2) {
+  if (!ID.test(id)) throw new RequestError(`\u8BF7\u6C42\u7F16\u53F7\u300C${id}\u300D\u683C\u5F0F\u4E0D\u5BF9\u3002`);
+  const request = readPending(dir, id);
+  if (!request) throw new RequestError(`\u6CA1\u6709\u5F85\u7B54\u590D\u7684\u8BF7\u6C42 #${id}\uFF1A\u5B83\u53EF\u80FD\u5DF2\u7ECF\u8D85\u65F6\u3001\u5DF2\u88AB\u7B54\u590D\uFF0C\u6216\u4F1A\u8BDD\u5DF2\u7ECF\u505C\u6B62\u3002`);
+  if (request.kind !== answer2.kind) {
+    throw new RequestError(
+      request.kind === "permission" ? `#${id} \u662F\u6743\u9650\u8BF7\u6C42\uFF0C\u8BF7\u7528 decision="allow" \u6216 "deny" \u7B54\u590D\u3002` : `#${id} \u662F\u63D0\u95EE\uFF0C\u8BF7\u7528 answers \u7B54\u590D\u3002`
+    );
+  }
+  if (fs2.existsSync(answerFile(dir, id))) throw new RequestError(`\u8BF7\u6C42 #${id} \u5DF2\u7ECF\u7B54\u590D\u8FC7\u4E86\u3002`);
+  writeAtomic(answerFile(dir, id), answer2);
+  return request;
+}
+async function waitForAnswer(dir, request, intervalMs = 500) {
+  const file = answerFile(dir, request.id);
+  for (; ; ) {
+    try {
+      return JSON.parse(fs2.readFileSync(file, "utf8"));
+    } catch {
+    }
+    if (request.deadline && Date.now() >= request.deadline) return void 0;
+    const left = request.deadline ? Math.max(0, request.deadline - Date.now()) : intervalMs;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(intervalMs, left)));
+  }
+}
+
+// src/worker/trust.ts
+import fs3 from "node:fs";
+import os3 from "node:os";
+import path3 from "node:path";
 var TrustError = class extends Error {
 };
-var defaultConfigFile = () => path2.join(os2.homedir(), ".claude.json");
-var expandHome = (p) => p.replace(/^~(?=$|\/)/, os2.homedir());
+var defaultConfigFile = () => path3.join(os3.homedir(), ".claude.json");
+var expandHome = (p) => p.replace(/^~(?=$|\/)/, os3.homedir());
 function readConfig(configFile) {
   try {
-    return JSON.parse(fs2.readFileSync(configFile, "utf8"));
+    return JSON.parse(fs3.readFileSync(configFile, "utf8"));
   } catch (error2) {
     if (error2.code === "ENOENT") return {};
     throw new TrustError(`\u65E0\u6CD5\u8BFB\u53D6 ${configFile}\uFF1A${error2.message}`);
@@ -7350,29 +7491,29 @@ function readConfig(configFile) {
 }
 function isTrusted(dir, configFile = defaultConfigFile()) {
   const projects = readConfig(configFile).projects ?? {};
-  for (let current = path2.resolve(expandHome(dir)); ; current = path2.dirname(current)) {
+  for (let current = path3.resolve(expandHome(dir)); ; current = path3.dirname(current)) {
     if (projects[current]?.hasTrustDialogAccepted) return true;
-    if (path2.dirname(current) === current) return false;
+    if (path3.dirname(current) === current) return false;
   }
 }
 function enclosingCheckout(dir) {
-  for (let current = dir; ; current = path2.dirname(current)) {
-    if (fs2.existsSync(path2.join(current, ".git"))) return current;
-    if (path2.dirname(current) === current) return void 0;
+  for (let current = dir; ; current = path3.dirname(current)) {
+    if (fs3.existsSync(path3.join(current, ".git"))) return current;
+    if (path3.dirname(current) === current) return void 0;
   }
 }
 function trustWorkRoot(root, configFile = defaultConfigFile()) {
-  const requested = path2.resolve(expandHome(root));
-  fs2.mkdirSync(requested, { recursive: true });
-  const dir = fs2.realpathSync(requested);
-  if (dir === fs2.realpathSync(os2.homedir())) {
+  const requested = path3.resolve(expandHome(root));
+  fs3.mkdirSync(requested, { recursive: true });
+  const dir = fs3.realpathSync(requested);
+  if (dir === fs3.realpathSync(os3.homedir())) {
     throw new TrustError("workRoot \u4E0D\u80FD\u662F\u4E3B\u76EE\u5F55\uFF1AClaude Code \u4E0D\u4F1A\u957F\u671F\u4FE1\u4EFB\u4E3B\u76EE\u5F55\u3002");
   }
   const checkout = enclosingCheckout(dir);
   if (checkout) {
     throw new TrustError(`workRoot \u5728 git \u4ED3\u5E93 ${checkout} \u91CC\u9762\uFF1A\u4FE1\u4EFB\u4F1A\u8BB0\u5728\u6574\u4E2A\u4ED3\u5E93\u4E0A\uFF0C\u8BF7\u6362\u4E00\u4E2A\u4ED3\u5E93\u4E4B\u5916\u7684\u76EE\u5F55\u3002`);
   }
-  if (fs2.existsSync(path2.join(dir, ".claude")) || fs2.existsSync(path2.join(dir, ".mcp.json"))) {
+  if (fs3.existsSync(path3.join(dir, ".claude")) || fs3.existsSync(path3.join(dir, ".mcp.json"))) {
     throw new TrustError(`${dir} \u91CC\u5DF2\u6709 Claude Code \u7684\u914D\u7F6E\uFF08.claude \u6216 .mcp.json\uFF09\uFF0C\u9700\u8981\u4F60\u4EB2\u81EA\u786E\u8BA4\uFF1A\u8BF7\u5728\u8BE5\u76EE\u5F55\u8FD0\u884C\u4E00\u6B21 claude\u3002`);
   }
   if (isTrusted(dir, configFile)) return false;
@@ -7381,9 +7522,9 @@ function trustWorkRoot(root, configFile = defaultConfigFile()) {
     const projects = config2.projects ??= {};
     projects[dir] = { ...projects[dir], hasTrustDialogAccepted: true };
     const temporary = `${configFile}.agent-remote-worker.${process.pid}`;
-    const mode = fs2.existsSync(configFile) ? fs2.statSync(configFile).mode & 511 : 384;
-    fs2.writeFileSync(temporary, JSON.stringify(config2, null, 2), { mode });
-    fs2.renameSync(temporary, configFile);
+    const mode = fs3.existsSync(configFile) ? fs3.statSync(configFile).mode & 511 : 384;
+    fs3.writeFileSync(temporary, JSON.stringify(config2, null, 2), { mode });
+    fs3.renameSync(temporary, configFile);
     if (isTrusted(dir, configFile)) return true;
   }
   throw new TrustError(`\u5199\u5165 ${configFile} \u540E\u4FE1\u4EFB\u8BB0\u5F55\u4ECD\u7136\u4E0D\u5728\uFF0C\u53EF\u80FD\u6709\u4F1A\u8BDD\u5728\u540C\u65F6\u6539\u5199\u8FD9\u4E2A\u6587\u4EF6\u3002\u8BF7\u91CD\u8BD5\u3002`);
@@ -7392,14 +7533,14 @@ function trustWorkRoot(root, configFile = defaultConfigFile()) {
 // src/worker/workspace.ts
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import fs3 from "node:fs";
-import os3 from "node:os";
-import path3 from "node:path";
+import fs4 from "node:fs";
+import os4 from "node:os";
+import path4 from "node:path";
 var WorkspaceError = class extends Error {
 };
 var SESSIONS = "sessions";
 var CLONE_TIMEOUT_MS = 10 * 6e4;
-var expandHome2 = (p) => p.replace(/^~(?=$|\/)/, os3.homedir());
+var expandHome2 = (p) => p.replace(/^~(?=$|\/)/, os4.homedir());
 var safeName = (value) => value.replace(/[^0-9A-Za-z._-]/g, "-").replace(/^[.-]+/, "") || "x";
 function projectName(url) {
   const last = url.replace(/[/\\]+$/, "").split(/[/:\\]/).pop() ?? "";
@@ -7407,13 +7548,13 @@ function projectName(url) {
 }
 function workspacePaths(root, url, session) {
   const base = `${projectName(url)}-${createHash("sha256").update(url).digest("hex").slice(0, 8)}`;
-  const absoluteRoot = path3.resolve(expandHome2(root));
-  const sessionDir = path3.join(absoluteRoot, SESSIONS, base, safeName(session));
+  const absoluteRoot = path4.resolve(expandHome2(root));
+  const sessionDir = path4.join(absoluteRoot, SESSIONS, base, safeName(session));
   return {
     root: absoluteRoot,
-    repo: path3.join(absoluteRoot, "repos", base),
+    repo: path4.join(absoluteRoot, "repos", base),
     sessionDir,
-    worktree: path3.join(sessionDir, projectName(url)),
+    worktree: path4.join(sessionDir, projectName(url)),
     localBranch: `rw/${safeName(session)}`
   };
 }
@@ -7437,10 +7578,10 @@ function git(cwd, args2, timeoutMs = 12e4, showProgress = false) {
 }
 function prepareWorkspace(request) {
   const paths = workspacePaths(request.root, request.url, request.session);
-  fs3.mkdirSync(paths.root, { recursive: true });
-  const cloned = !fs3.existsSync(path3.join(paths.repo, ".git"));
+  fs4.mkdirSync(paths.root, { recursive: true });
+  const cloned = !fs4.existsSync(path4.join(paths.repo, ".git"));
   if (cloned) {
-    fs3.mkdirSync(path3.dirname(paths.repo), { recursive: true });
+    fs4.mkdirSync(path4.dirname(paths.repo), { recursive: true });
     git(void 0, ["clone", "--progress", request.url, paths.repo], CLONE_TIMEOUT_MS, true);
   } else {
     git(paths.repo, ["fetch", "--progress", "--prune", "origin"], CLONE_TIMEOUT_MS, true);
@@ -7450,23 +7591,23 @@ function prepareWorkspace(request) {
   } catch {
     throw new WorkspaceError(`\u63D0\u4EA4 ${request.commit.slice(0, 12)} \u4E0D\u5728\u8FDC\u7AEF\u4ED3\u5E93\u91CC\uFF0C\u4E3B\u8282\u70B9\u9700\u8981\u5148\u63A8\u9001\u3002`);
   }
-  if (fs3.existsSync(paths.sessionDir)) {
+  if (fs4.existsSync(paths.sessionDir)) {
     throw new WorkspaceError(`\u4F1A\u8BDD\u540D\u300C${request.session}\u300D\u5728\u8FD9\u4E2A\u9879\u76EE\u4E0A\u5DF2\u6709\u5DE5\u4F5C\u76EE\u5F55 ${paths.sessionDir}\uFF0C\u8BF7\u6362\u4E00\u4E2A\u540D\u5B57\u3002`);
   }
   git(paths.repo, ["worktree", "prune"]);
-  fs3.mkdirSync(paths.sessionDir, { recursive: true });
+  fs4.mkdirSync(paths.sessionDir, { recursive: true });
   git(paths.repo, ["worktree", "add", "--quiet", "-B", paths.localBranch, paths.worktree, request.commit]);
   return { path: paths.sessionDir, codeDir: paths.worktree, localBranch: paths.localBranch, cloned };
 }
 function removeWorkspace(request) {
-  const sessionDir = path3.resolve(request.path);
-  const managed = path3.join(path3.resolve(expandHome2(request.root)), SESSIONS) + path3.sep;
+  const sessionDir = path4.resolve(request.path);
+  const managed = path4.join(path4.resolve(expandHome2(request.root)), SESSIONS) + path4.sep;
   if (!sessionDir.startsWith(managed)) return { removed: false, reason: "\u4E0D\u662F\u672C\u63D2\u4EF6\u521B\u5EFA\u7684\u5DE5\u4F5C\u76EE\u5F55\uFF0C\u672A\u5220\u9664" };
-  if (!fs3.existsSync(sessionDir)) return { removed: false, reason: "\u5DE5\u4F5C\u76EE\u5F55\u5DF2\u4E0D\u5B58\u5728" };
-  const inside = fs3.readdirSync(sessionDir).map((entry) => path3.join(sessionDir, entry));
-  const worktree = inside.find((entry) => fs3.existsSync(path3.join(entry, ".git")));
+  if (!fs4.existsSync(sessionDir)) return { removed: false, reason: "\u5DE5\u4F5C\u76EE\u5F55\u5DF2\u4E0D\u5B58\u5728" };
+  const inside = fs4.readdirSync(sessionDir).map((entry) => path4.join(sessionDir, entry));
+  const worktree = inside.find((entry) => fs4.existsSync(path4.join(entry, ".git")));
   if (!worktree) {
-    fs3.rmSync(sessionDir, { recursive: true, force: true });
+    fs4.rmSync(sessionDir, { recursive: true, force: true });
     return { removed: true };
   }
   if (!request.force) {
@@ -7480,10 +7621,10 @@ function removeWorkspace(request) {
       return { removed: false, reason: `\u5DE5\u4F5C\u76EE\u5F55\u91CC\u8FD8\u6709${parts.join("\u548C")}` };
     }
   }
-  const repo = path3.dirname(git(worktree, ["rev-parse", "--path-format=absolute", "--git-common-dir"]));
+  const repo = path4.dirname(git(worktree, ["rev-parse", "--path-format=absolute", "--git-common-dir"]));
   const branch = git(worktree, ["rev-parse", "--abbrev-ref", "HEAD"]);
   git(repo, ["worktree", "remove", "--force", worktree]);
-  fs3.rmSync(sessionDir, { recursive: true, force: true });
+  fs4.rmSync(sessionDir, { recursive: true, force: true });
   if (branch.startsWith("rw/")) {
     try {
       git(repo, ["branch", "-D", branch]);
@@ -7520,16 +7661,16 @@ function prep(masterId) {
     return 2;
   }
   let base = process.env.XDG_RUNTIME_DIR;
-  if (!base || !fs4.existsSync(base)) base = `/tmp/agent-remote-worker-${os4.userInfo().uid}`;
-  const dir = path4.join(base, "agent-remote-worker");
-  fs4.mkdirSync(dir, { recursive: true, mode: 448 });
-  const owner = fs4.lstatSync(dir);
-  if (!owner.isDirectory() || owner.uid !== os4.userInfo().uid || (owner.mode & 63) !== 0) {
+  if (!base || !fs5.existsSync(base)) base = `/tmp/agent-remote-worker-${os5.userInfo().uid}`;
+  const dir = path5.join(base, "agent-remote-worker");
+  fs5.mkdirSync(dir, { recursive: true, mode: 448 });
+  const owner = fs5.lstatSync(dir);
+  if (!owner.isDirectory() || owner.uid !== os5.userInfo().uid || (owner.mode & 63) !== 0) {
     console.error(`refusing to use ${dir}: not a private directory of this user`);
     return 4;
   }
-  const socket = path4.join(dir, `master-${id}.sock`);
-  fs4.rmSync(socket, { force: true });
+  const socket = path5.join(dir, `master-${id}.sock`);
+  fs5.rmSync(socket, { force: true });
   const result = {
     socket,
     script: fileURLToPath(import.meta.url),
@@ -7565,33 +7706,100 @@ async function workspace(action) {
     return 5;
   }
 }
-function formatQuestions(input) {
-  const questions = input.questions ?? [];
-  return questions.map((q, index) => {
-    const options = (q.options ?? []).map((option) => `  - ${option.label ?? ""}${option.description ? `\uFF1A${option.description}` : ""}`).join("\n");
-    const title = questions.length > 1 ? `\u95EE\u9898 ${index + 1}\uFF1A${q.question ?? ""}` : q.question ?? "";
-    return options ? `${title}
-${options}` : title;
-  }).join("\n\n");
-}
-async function hookAsk([socket, worker, session]) {
-  let reason = QUESTION_FORWARDED;
-  try {
-    const input = JSON.parse(await readStdin()).tool_input;
-    await postToInbox(socket ?? "", workerMessage(worker ?? "worker", session ?? "?", "question", formatQuestions(input)));
-  } catch {
-    reason = QUESTION_NOT_FORWARDED;
+function permissionOutput(request, answer2, fallback) {
+  let decision;
+  if (answer2?.kind === "permission" && answer2.decision === "allow") {
+    const rules = answer2.remember ? rememberable(request.suggestions) : [];
+    decision = {
+      behavior: "allow",
+      // "Don't ask again" for the rest of this session only, never written to settings files.
+      ...rules.length ? { updatedPermissions: rules.map((entry) => ({ ...entry, destination: "session" })) } : {}
+    };
+  } else if (answer2?.kind === "permission") {
+    decision = { behavior: "deny", message: permissionDenied(answer2.message) };
+  } else {
+    decision = { behavior: "deny", message: fallback };
   }
-  console.log(
-    JSON.stringify({
+  return { hookSpecificOutput: { hookEventName: "PermissionRequest", decision } };
+}
+function questionOutput(request, answer2, fallback) {
+  if (answer2?.kind === "question") {
+    const answers = Object.fromEntries(questionTexts(request.toolInput).map((text, i) => [text, answer2.answers[i] ?? ""]));
+    return {
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
-        permissionDecision: "deny",
-        permissionDecisionReason: reason
+        permissionDecision: "allow",
+        updatedInput: { ...request.toolInput, answers }
       }
-    })
-  );
+    };
+  }
+  return {
+    hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: fallback }
+  };
+}
+async function hookRequest(kind, args2) {
+  const [socket = "", worker = "worker", session = "?", timeoutArg, approvalArg] = args2;
+  const input = JSON.parse(await readStdin());
+  const timeoutMs = Math.max(0, Number(timeoutArg) || 0) * 1e3;
+  const dir = requestsDir();
+  const request = {
+    id: newRequestId(),
+    kind,
+    worker,
+    session,
+    pid: process.pid,
+    createdAt: Date.now(),
+    deadline: timeoutMs ? Date.now() + timeoutMs : 0,
+    approval: approvalArg === "user" ? "user" : "master",
+    toolName: String(input.tool_name ?? (kind === "question" ? "AskUserQuestion" : "?")),
+    toolInput: input.tool_input ?? {},
+    ...Array.isArray(input.permission_suggestions) ? { suggestions: input.permission_suggestions } : {}
+  };
+  const output = kind === "permission" ? permissionOutput : questionOutput;
+  const cleanUp = () => removeRequest(dir, request.id);
+  for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+    process.once(signal, () => {
+      cleanUp();
+      process.exit(1);
+    });
+  }
+  try {
+    savePending(dir, request);
+    await postToInbox(socket, requestMessage(request));
+  } catch {
+    cleanUp();
+    console.log(JSON.stringify(output(request, void 0, kind === "permission" ? PERMISSION_NOT_FORWARDED : QUESTION_NOT_FORWARDED)));
+    return 0;
+  }
+  const answer2 = await waitForAnswer(dir, request);
+  cleanUp();
+  console.log(JSON.stringify(output(request, answer2, kind === "permission" ? PERMISSION_TIMED_OUT : QUESTION_TIMED_OUT)));
   return 0;
+}
+async function hookDenied([socket = "", worker = "worker", session = "?"]) {
+  try {
+    const input = JSON.parse(await readStdin());
+    await postToInbox(
+      socket,
+      autoDeniedMessage(worker, session, String(input.tool_name ?? "?"), input.tool_input ?? {}, String(input.reason ?? ""))
+    );
+  } catch {
+  }
+  return 0;
+}
+function pending() {
+  console.log(JSON.stringify(listPending(requestsDir())));
+  return 0;
+}
+async function answer(id) {
+  try {
+    const request = answerRequest(requestsDir(), id ?? "", JSON.parse(await readStdin()));
+    console.log(JSON.stringify(request));
+    return 0;
+  } catch (error2) {
+    console.error(error2 instanceof RequestError ? error2.message : String(error2));
+    return 5;
+  }
 }
 async function runCli(command2, args2) {
   switch (command2) {
@@ -7600,7 +7808,15 @@ async function runCli(command2, args2) {
     case "workspace-remove":
       return workspace("remove");
     case "hook-ask":
-      return hookAsk(args2);
+      return hookRequest("question", args2);
+    case "hook-denied":
+      return hookDenied(args2);
+    case "hook-permission":
+      return hookRequest("permission", args2);
+    case "pending":
+      return pending();
+    case "answer":
+      return answer(args2[0]);
     case "post":
       return post(args2[0]);
     case "prep":
@@ -7610,7 +7826,7 @@ async function runCli(command2, args2) {
     case "trust-root":
       return trustRoot(args2[0]);
     default:
-      console.error("usage: worker.js serve | post <pid> | prep <master-id> | trust <dir>");
+      console.error("usage: worker.js serve | post <pid> | prep <master-id> | trust <dir> | pending | answer <id>");
       return 2;
   }
 }
@@ -8093,8 +8309,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path5, errorMaps, issueData } = params;
-  const fullPath = [...path5, ...issueData.path || []];
+  const { data, path: path6, errorMaps, issueData } = params;
+  const fullPath = [...path6, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -8210,11 +8426,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path5, key) {
+  constructor(parent, value, path6, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path5;
+    this._path = path6;
     this._key = key;
   }
   get path() {
@@ -11851,10 +12067,10 @@ function assignProp(target, prop, value) {
     configurable: true
   });
 }
-function getElementAtPath(obj, path5) {
-  if (!path5)
+function getElementAtPath(obj, path6) {
+  if (!path6)
     return obj;
-  return path5.reduce((acc, key) => acc?.[key], obj);
+  return path6.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -12174,11 +12390,11 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path5, issues) {
+function prefixIssues(path6, issues) {
   return issues.map((iss) => {
     var _a;
     (_a = iss).path ?? (_a.path = []);
-    iss.path.unshift(path5);
+    iss.path.unshift(path6);
     return iss;
   });
 }
@@ -15589,11 +15805,11 @@ function normalizeObjectSchema(schema) {
   }
   return void 0;
 }
-function getDotPath(path5) {
-  if (path5.length === 0) {
+function getDotPath(path6) {
+  if (path6.length === 0) {
     return "object root";
   }
-  return path5.reduce((acc, seg, index) => {
+  return path6.reduce((acc, seg, index) => {
     if (index === 0) {
       return String(seg);
     }

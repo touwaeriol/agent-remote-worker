@@ -8,13 +8,15 @@ import {
   REMOTE_SCRIPT,
   WORKER_ALLOWED_TOOLS,
   WORKER_SERVER,
+  type PendingRequest,
   type PermissionMode,
+  type RequestAnswer,
   type WorkerEnv,
 } from "../shared/protocol.ts";
 import { ToolError } from "../shared/tooling.ts";
 import type { PrepResult } from "../worker/cli.ts";
 import type { RemoveRequest, Workspace, WorkspaceRequest } from "../worker/workspace.ts";
-import type { WorkerConfig } from "./config.ts";
+import { HOOK_TIMEOUT_MAX, type WorkerConfig } from "./config.ts";
 import { SshHost, shPath, shq } from "./exec.ts";
 import { USAGE_ARGS, parseUsage, type Usage } from "./usage.ts";
 
@@ -207,13 +209,36 @@ export class WorkerNode {
         [WORKER_SERVER]: { command: options.channel.node, args: [options.channel.script, "serve"], env },
       },
     };
-    const hookCommand = [options.channel.node, options.channel.script, "hook-ask", env.CW_MASTER_SOCK, env.CW_WORKER, env.CW_SESSION]
-      .map(shq)
-      .join(" ");
+    const { approval, approvalTimeout } = this.config;
+    const hook = (command: string) => ({
+      type: "command",
+      command: [options.channel.node, options.channel.script, command, env.CW_MASTER_SOCK, env.CW_WORKER, env.CW_SESSION, String(approvalTimeout), approval]
+        .map(shq)
+        .join(" "),
+      // The hook waits for the master's answer; Claude Code must not give up on it first.
+      // With no limit set, give it the longest timeout a timer can hold.
+      timeout: approvalTimeout ? approvalTimeout + 60 : HOOK_TIMEOUT_MAX,
+    });
     const settings = {
-      // Nobody sits at a worker session: its built-in questions go to the master instead.
+      // Nobody sits at a worker session: its permission prompts and questions go to the master instead.
       hooks: {
-        PreToolUse: [{ matcher: "AskUserQuestion", hooks: [{ type: "command", command: hookCommand }] }],
+        PreToolUse: [{ matcher: "AskUserQuestion", hooks: [hook("hook-ask")] }],
+        PermissionRequest: [{ matcher: "*", hooks: [hook("hook-permission")] }],
+        // Auto mode refuses some calls without a prompt; at least let the master know.
+        PermissionDenied: [
+          {
+            matcher: "*",
+            hooks: [
+              {
+                type: "command",
+                command: [options.channel.node, options.channel.script, "hook-denied", env.CW_MASTER_SOCK, env.CW_WORKER, env.CW_SESSION]
+                  .map(shq)
+                  .join(" "),
+                timeout: 30,
+              },
+            ],
+          },
+        ],
       },
       // A session that bypasses permission prompts holds peer messages unless told to accept them.
       ...(options.permissionMode === "bypassPermissions" ? { crossSessionInbound: "accept" } : {}),
@@ -257,6 +282,30 @@ export class WorkerNode {
   /** Deletes a stopped session's record on the worker. */
   async forget(session: RemoteSession): Promise<void> {
     await this.ssh.execOk(`${this.claude} rm ${shq(session.id)}`, "删除会话");
+  }
+
+  // ---- permission prompts and questions
+
+  /** Requests the worker's sessions are holding for an answer. */
+  async pendingRequests(): Promise<PendingRequest[]> {
+    await this.ensureScript();
+    const out = await this.ssh.execOk(this.helper("pending"), "查询待答复的请求");
+    try {
+      return JSON.parse(out.slice(out.indexOf("["))) as PendingRequest[];
+    } catch {
+      throw new ToolError(`无法解析待答复的请求：${out.slice(0, 200)}`);
+    }
+  }
+
+  /** Hands an answer to the session waiting on request `id`; returns that request. */
+  async answerRequest(id: string, answer: RequestAnswer): Promise<PendingRequest> {
+    await this.ensureScript();
+    const result = await this.ssh.exec(this.helper(`answer ${shq(id)}`), { input: JSON.stringify(answer) });
+    if (result.code === 5) throw new ToolError(result.stderr.trim());
+    if (result.code !== 0) {
+      throw new ToolError(`答复请求失败（退出码 ${result.code}）：${(result.stderr || result.stdout).trim().slice(-400)}`);
+    }
+    return JSON.parse(result.stdout.slice(result.stdout.indexOf("{"))) as PendingRequest;
   }
 
   // ---- code

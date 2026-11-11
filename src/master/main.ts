@@ -11,7 +11,7 @@ const INSTRUCTIONS =
   "和内置 Sub Agent 不同：worker 在另一台机器、另一个账号、独立的代码副本上运行，看不到本会话的上下文和文件，" +
   "所以 worker_dispatch 的 task 必须自包含（目标、边界、验收标准）。代码通过 Git 远端同步：派发前本机代码要已提交并推送，" +
   "worker 默认把结果推回本机当前所在的分支，由你 git pull 后审查。" +
-  "worker 的提问由你回答：任务范围内你能定的直接回复，需求取舍、有风险或不可逆的操作、超出原任务范围的事先问用户。" +
+  "worker 的权限请求和提问会转给你，worker 在原地等待：用 worker_answer 按编号答复。任务范围内你能定的直接答复，需求取舍、有风险或不可逆的操作、超出原任务范围的事先问用户。" +
   "用户要求派给 worker 时才派发。派发后不需要轮询：worker 的汇报和提问会作为以 [agent-remote-worker] 开头的消息自动出现，用 worker_send 回复。" +
   "派发前会自动检查 worker 的额度。详细做法见 agent-remote-worker:dispatch skill。";
 
@@ -57,6 +57,34 @@ server.registerTool(
     inputSchema: { worker, session, message: z.string() },
   },
   textTool((args) => master.send(args)),
+);
+
+server.registerTool(
+  "worker_answer",
+  {
+    description:
+      "答复 worker 会话正在等待的一个权限请求或提问（消息里的 #编号）。权限请求给 decision，提问给 answers；worker 收到后当场继续。" +
+      "需求取舍、有风险或不可逆的操作、超出原任务范围的事，先问用户再答复。",
+    inputSchema: {
+      worker,
+      request_id: z.string().describe("请求编号，即消息里 # 后面的部分"),
+      decision: z.enum(["allow", "deny"]).optional().describe("权限请求：allow 放行，deny 拒绝"),
+      message: z.string().optional().describe("拒绝时告诉 worker 的理由或替代做法"),
+      remember: z.boolean().optional().describe("放行时，本会话内同类操作不再询问"),
+      answers: z.array(z.string()).optional().describe("提问：按问题顺序，每个问题一个答案（选项标签或自由文本，多选用逗号分隔）"),
+      user_confirmed: z.boolean().optional().describe("这个答复已经问过用户；节点配置为 approval=user 时必须为 true"),
+    },
+  },
+  textTool((args) => master.answer(args)),
+);
+
+server.registerTool(
+  "worker_pending",
+  {
+    description: "列出 worker 会话正在等待答复的权限请求和提问。通道断过、或想确认有没有漏掉的请求时使用。",
+    inputSchema: { worker },
+  },
+  textTool((args) => master.pending(args)),
 );
 
 server.registerTool(
