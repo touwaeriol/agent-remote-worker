@@ -21577,13 +21577,14 @@ function masterMessage(body) {
   return `${MASTER_PREFIX} ${body.trim()}`;
 }
 function codeRules(code) {
+  const deliver = code.deliver;
   return [
     "",
     "\u4EE3\u7801\uFF1A",
     `- \u9879\u76EE\u5DF2\u7ECF\u4E3A\u8FD9\u6B21\u4EFB\u52A1\u51C6\u5907\u597D\uFF0C\u5728 ${code.dir}\uFF08\u5F53\u524D\u76EE\u5F55\u4E0B\u7684\u5B50\u76EE\u5F55\uFF09\u3002\u6240\u6709\u6587\u4EF6\u548C git \u64CD\u4F5C\u90FD\u5728\u90A3\u91CC\u8FDB\u884C\uFF0C\u4E0D\u9700\u8981\u518D\u514B\u9686\u3002`,
-    `- \u5B83\u662F\u4ED3\u5E93 ${code.url} \u7684\u4E00\u4E2A\u72EC\u7ACB git worktree\uFF0C\u672C\u5730\u5206\u652F ${code.localBranch}\uFF0C\u8D77\u70B9\u662F\u4E3B\u8282\u70B9\u7684\u63D0\u4EA4 ${code.commit.slice(0, 12)}\uFF08\u4E3B\u8282\u70B9\u7684\u5206\u652F\uFF1A${code.branch}\uFF09\u3002`,
+    `- \u5B83\u662F\u4ED3\u5E93 ${code.url} \u7684\u4E00\u4E2A\u72EC\u7ACB git worktree\uFF0C\u672C\u5730\u5206\u652F ${code.localBranch}\uFF0C\u8D77\u70B9\u662F ${code.start} \u7684\u63D0\u4EA4 ${code.commit.slice(0, 12)}\u3002`,
     "- \u4F60\u548C\u4E3B\u8282\u70B9\u901A\u8FC7 Git \u8FDC\u7AEF\u540C\u6B65\u4EE3\u7801\u3002\u4F60\u62E5\u6709\u4E0E\u4E3B\u8282\u70B9\u76F8\u540C\u7684\u4ED3\u5E93\u6743\u9650\uFF0C\u5BC6\u94A5\u5DF2\u7ECF\u914D\u7F6E\u597D\uFF0C\u53EF\u4EE5\u76F4\u63A5 fetch \u548C push\u3002",
-    `- \u4EA4\u4ED8\u65B9\u5F0F\uFF1A\u63D0\u4EA4\u540E\u6267\u884C git fetch origin && git rebase origin/${code.branch}\uFF0C\u518D git push origin HEAD:${code.branch}\u3002\u4EFB\u52A1\u91CC\u6307\u5B9A\u4E86\u522B\u7684\u5206\u652F\u65F6\u4EE5\u4EFB\u52A1\u4E3A\u51C6\u3002`,
+    `- \u4EA4\u4ED8\u5206\u652F\uFF1A${deliver}\u3002\u63D0\u4EA4\u540E\u6267\u884C git fetch origin\uFF1B\u5982\u679C\u8FDC\u7AEF\u5DF2\u6709\u8FD9\u4E2A\u5206\u652F\uFF08git ls-remote --exit-code --heads origin ${deliver} \u6210\u529F\uFF09\uFF0C\u5148 git rebase origin/${deliver}\uFF1B\u7136\u540E git push origin HEAD:${deliver}\u3002`,
     "- \u63A8\u9001\u88AB\u62D2\u7EDD\u5C31\u91CD\u65B0 fetch\u3001rebase \u518D\u63A8\u3002\u4E0D\u8981\u5F3A\u5236\u63A8\u9001\uFF1B\u51B2\u7A81\u89E3\u51B3\u4E0D\u4E86\u65F6\u7528 ask_master\u3002",
     "- \u5B8C\u6210\u6C47\u62A5\u91CC\u5199\u660E\u63A8\u9001\u5230\u7684\u5206\u652F\u548C\u63D0\u4EA4\u53F7\uFF0C\u4E3B\u8282\u70B9\u4F1A\u62C9\u53D6\u540E\u5BA1\u67E5\u3002"
   ];
@@ -21745,10 +21746,16 @@ import os2 from "node:os";
 var OPEN_TIMEOUT_MS = 12e3;
 var WATCH_INTERVAL_MS = 1e4;
 var hasEnded = (child) => child.exitCode !== null || child.signalCode !== null;
+function masterSessionId() {
+  const session2 = process.env.CLAUDE_CODE_SESSION_ID || process.env.CLAUDE_SESSION_ID || ownSessionInbox() || `ppid:${process.ppid}`;
+  return createHash("sha256").update(`${os2.userInfo().username}@${os2.hostname()}
+${session2}`).digest("hex").slice(0, 16);
+}
 var Channels = class {
   channels = /* @__PURE__ */ new Map();
   opening = /* @__PURE__ */ new Map();
-  masterId = createHash("sha256").update(`${os2.userInfo().username}@${os2.hostname()}`).digest("hex").slice(0, 12);
+  /** This master session's id: one forwarded inbox per master session on each worker. */
+  masterId = masterSessionId();
   onReopen;
   /** `onReopen` runs after a lost channel comes back, to let sessions re-report. */
   constructor(onReopen) {
@@ -22053,6 +22060,33 @@ function syncProblems(project) {
     project.uncommitted ? `\u6709 ${project.uncommitted} \u4E2A\u6587\u4EF6\u7684\u6539\u52A8\u8FD8\u6CA1\u6709\u63D0\u4EA4` : ""
   ].filter(Boolean);
 }
+async function resolveStart(project, ref) {
+  const name = ref.trim().replace(/^origin\//, "").replace(/^refs\/heads\//, "");
+  if (!name) throw new ToolError("base_ref \u4E0D\u80FD\u4E3A\u7A7A\u3002");
+  const lsRemote = async (pattern) => {
+    const result = await run("git", ["-C", project.dir, "ls-remote", "origin", pattern], { timeoutMs: 6e4 });
+    if (result.code !== 0) throw new ToolError(`\u65E0\u6CD5\u67E5\u8BE2\u8FDC\u7AEF origin\uFF1A${result.stderr.trim().slice(-300)}`);
+    return result.stdout.trim().split("\n").filter(Boolean).map((line) => line.split(/\s+/));
+  };
+  const heads = await lsRemote(`refs/heads/${name}`);
+  if (heads[0]) return { commit: heads[0][0], branch: name };
+  const tags = await lsRemote(`refs/tags/${name}*`);
+  const tag = tags.find(([, refName]) => refName === `refs/tags/${name}^{}`) ?? tags.find(([, refName]) => refName === `refs/tags/${name}`);
+  if (tag) return { commit: tag[0] };
+  if (/^[0-9a-f]{7,40}$/i.test(name)) {
+    const full = await git(project.dir, "rev-parse", "--verify", "--quiet", `${name}^{commit}`);
+    if (full) return { commit: full };
+    if (name.length === 40) return { commit: name.toLowerCase() };
+    throw new ToolError(`\u672C\u673A\u627E\u4E0D\u5230\u63D0\u4EA4 ${name}\uFF0C\u65E0\u6CD5\u786E\u8BA4\u5B8C\u6574\u7684\u63D0\u4EA4\u53F7\u3002\u8BF7\u7ED9\u5B8C\u6574\u7684 40 \u4F4D\u63D0\u4EA4\u53F7\uFF0C\u6216\u7ED9\u8FDC\u7AEF\u5206\u652F\u540D\u3002`);
+  }
+  throw new ToolError(`base_ref\u300C${ref}\u300D\u5728 origin \u4E0A\u65E2\u4E0D\u662F\u5206\u652F\u4E5F\u4E0D\u662F\u6807\u7B7E\uFF0C\u4E5F\u4E0D\u50CF\u63D0\u4EA4\u53F7\u3002`);
+}
+async function checkBranchName(dir, name) {
+  const branch = name.trim().replace(/^origin\//, "").replace(/^refs\/heads\//, "");
+  const result = await run("git", ["-C", dir, "check-ref-format", "--branch", branch], { timeoutMs: 1e4 });
+  if (!branch || result.code !== 0) throw new ToolError(`deliver_branch\u300C${name}\u300D\u4E0D\u662F\u5408\u6CD5\u7684\u5206\u652F\u540D\u3002`);
+  return branch;
+}
 
 // src/master/usage.ts
 var USAGE_ARGS = ["-p", "/usage", "--output-format", "json"];
@@ -22287,9 +22321,30 @@ ${result.stderr}`.trim();
   async stop(session2) {
     await this.ssh.execOk(`${this.claude} stop ${shq(session2.id)}`, "\u505C\u6B62\u4F1A\u8BDD");
   }
-  /** Deletes a stopped session's record on the worker. */
+  /** Deletes a stopped session's record on the worker, and its route. */
   async forget(session2) {
     await this.ssh.execOk(`${this.claude} rm ${shq(session2.id)}`, "\u5220\u9664\u4F1A\u8BDD");
+    if (session2.name) await this.ssh.exec(this.helper(`unroute ${shq(session2.name)}`)).catch(() => {
+    });
+  }
+  // ---- routes: which master session a worker session reports to
+  /**
+   * Points the session's reports and requests at this master session; fields
+   * left out (such as the launch settings) keep their value, null clears one.
+   */
+  async setRoute(sessionName, route) {
+    await this.ensureScript();
+    await this.ssh.execOk(this.helper(`route ${shq(sessionName)}`), "\u7ED1\u5B9A\u4F1A\u8BDD\u5230\u672C\u4E3B\u4F1A\u8BDD", { input: JSON.stringify(route) });
+  }
+  /** The session's route, if it has one. */
+  async getRoute(sessionName) {
+    await this.ensureScript();
+    const out = await this.ssh.execOk(this.helper(`route-show ${shq(sessionName)}`), "\u8BFB\u53D6\u4F1A\u8BDD\u7684\u542F\u52A8\u53C2\u6570");
+    try {
+      return JSON.parse(out.trim().split("\n").at(-1) ?? "null") ?? void 0;
+    } catch {
+      return void 0;
+    }
   }
   // ---- permission prompts and questions
   /** Requests the worker's sessions are holding for an answer. */
@@ -22303,9 +22358,9 @@ ${result.stderr}`.trim();
     }
   }
   /** Hands an answer to the session waiting on request `id`; returns that request. */
-  async answerRequest(id, answer) {
+  async answerRequest(id, answer, masterId) {
     await this.ensureScript();
-    const result = await this.ssh.exec(this.helper(`answer ${shq(id)}`), { input: JSON.stringify(answer) });
+    const result = await this.ssh.exec(this.helper(`answer ${shq(id)} ${shq(masterId)}`), { input: JSON.stringify(answer) });
     if (result.code === 5) throw new ToolError(result.stderr.trim());
     if (result.code !== 0) {
       throw new ToolError(`\u7B54\u590D\u8BF7\u6C42\u5931\u8D25\uFF08\u9000\u51FA\u7801 ${result.code}\uFF09\uFF1A${(result.stderr || result.stdout).trim().slice(-400)}`);
@@ -22378,7 +22433,7 @@ var Master = class {
     names.add(sessionName);
   }
   async askToReport(node) {
-    const pending = await node.pendingRequests().catch(() => []);
+    const pending = (await node.pendingRequests().catch(() => [])).filter((request) => this.owns(request));
     if (pending.length) {
       await this.notify(
         `${WORKER_PREFIX} \u548C worker\u300C${node.name}\u300D\u7684\u901A\u9053\u521A\u521A\u6062\u590D\uFF0C\u4E0B\u9762 ${pending.length} \u4E2A\u8BF7\u6C42\u4ECD\u5728\u7B49\u5F85\u7B54\u590D\uFF1A
@@ -22395,12 +22450,21 @@ var Master = class {
       }
     }
   }
+  /** Whether a request is this master session's to answer (or nobody's in particular). */
+  owns(request) {
+    return !request.master || request.master === this.channels.masterId;
+  }
+  /** Points a worker session at this master session, keeping or setting how it was launched. */
+  bind(node, sessionName, channel, launch) {
+    const settings = launch ? { permissionMode: launch.permissionMode, model: launch.model ?? null } : {};
+    return node.setRoute(sessionName, { socket: channel.socket, master: this.channels.masterId, ...settings });
+  }
   // ---- dispatch, send, resume
   async dispatch(args) {
     const { node, config: config2 } = this.resolve(args.worker);
     const task = args.task.trim();
     if (!task) throw new ToolError("task \u4E0D\u80FD\u4E3A\u7A7A\u3002");
-    const project = args.cwd ? void 0 : await this.projectToHandOver(args);
+    const handover = args.cwd ? void 0 : await this.projectToHandOver(args);
     const quotaNote = args.force ? "" : await this.checkQuota(node, config2);
     const channel = await this.channels.ensure(node);
     let name = args.name?.trim() || randomName();
@@ -22408,8 +22472,9 @@ var Master = class {
     if (taken.includes(name)) name += `-${randomBytes(2).toString("hex")}`;
     const permissionMode2 = args.permission_mode ?? node.config.permissionMode;
     const follow = "worker \u7684\u6C47\u62A5\u548C\u63D0\u95EE\u4F1A\u4F5C\u4E3A\u6D88\u606F\u81EA\u52A8\u51FA\u73B0\u5728\u672C\u4F1A\u8BDD\u91CC\uFF0C\u4E0D\u9700\u8981\u8F6E\u8BE2\u3002\u8FFD\u52A0\u6307\u4EE4\u7528 worker_send\u3002";
-    if (!project) {
+    if (!handover) {
       const cwd = args.cwd.trim();
+      await this.bind(node, name, channel, { permissionMode: permissionMode2, model: args.model });
       const id = await node.launch({ cwd, name, prompt: taskBrief(task), permissionMode: permissionMode2, model: args.model, channel });
       this.remember(node, name);
       return [
@@ -22429,22 +22494,24 @@ var Master = class {
     }
     const job = { worker: node.name, phase: "\u6B63\u5728 worker \u4E0A\u514B\u9686\u6216\u66F4\u65B0\u9879\u76EE", startedAt: Date.now() };
     this.preparing.set(name, job);
-    void this.prepareAndLaunch(node, job, { name, task, project, permissionMode: permissionMode2, model: args.model, channel }).then((text) => this.notify(text)).finally(() => this.preparing.delete(name));
+    void this.prepareAndLaunch(node, job, { name, task, handover, permissionMode: permissionMode2, model: args.model, channel }).then((text) => this.notify(text)).finally(() => this.preparing.delete(name));
     return [
       `\u5DF2\u53D7\u7406\uFF0C\u6B63\u5728 worker\u300C${node.name}\u300D\u4E0A\u51C6\u5907\u4EE3\u7801\uFF0C\u51C6\u5907\u597D\u540E\u81EA\u52A8\u542F\u52A8\u4F1A\u8BDD\u3002`,
       `\u540D\u5B57\uFF1A${name}`,
-      `\u4EE3\u7801\uFF1A${project.url} \u7684 ${project.branch}@${project.commit.slice(0, 12)}`,
+      `\u4EE3\u7801\uFF1A${handover.project.url}\uFF0C\u8D77\u70B9 ${handover.start}@${handover.commit.slice(0, 12)}`,
+      `\u4EA4\u4ED8\u5206\u652F\uFF1A${handover.deliver}`,
       `\u6743\u9650\u6A21\u5F0F\uFF1A${permissionMode2}`,
       "\u4E0D\u9700\u8981\u7B49\u5F85\uFF1A\u4F1A\u8BDD\u542F\u52A8\uFF08\u6216\u51C6\u5907\u5931\u8D25\uFF09\u65F6\u672C\u4F1A\u8BDD\u4F1A\u6536\u5230\u4E00\u6761\u901A\u77E5\u3002\u60F3\u770B\u8FDB\u5EA6\u7528 worker_status\u3002" + quotaNote
     ].join("\n");
   }
   /** The background half of a dispatch. Resolves to the notice the master session should read. */
   async prepareAndLaunch(node, job, plan) {
-    const { name, project } = plan;
+    const { name, handover } = plan;
+    const { project } = handover;
     let sessionDir;
     try {
       const workspace = await node.addWorkspace(
-        { url: project.url, commit: project.commit, session: name },
+        { url: project.url, commit: handover.commit, session: name },
         (line) => job.progress = line
       );
       sessionDir = workspace.path;
@@ -22452,11 +22519,13 @@ var Master = class {
       job.progress = void 0;
       const code = {
         url: project.url,
-        branch: project.branch,
-        commit: project.commit,
+        start: handover.start,
+        commit: handover.commit,
+        deliver: handover.deliver,
         localBranch: workspace.localBranch,
         dir: workspace.codeDir
       };
+      await this.bind(node, name, plan.channel, { permissionMode: plan.permissionMode, model: plan.model });
       const id = await node.launch({
         cwd: workspace.path,
         name,
@@ -22466,7 +22535,7 @@ var Master = class {
         channel: plan.channel
       });
       this.remember(node, name);
-      return `${WORKER_PREFIX} worker\u300C${node.name}\u300D\u4F1A\u8BDD\u300C${name}\u300D\u5DF2\u542F\u52A8\uFF08id ${id}\uFF09\u3002\u4EE3\u7801\u5DF2${workspace.cloned ? "\u514B\u9686" : "\u66F4\u65B0"}\u5230 ${workspace.codeDir}\uFF0C\u8D77\u70B9 ${project.branch}@${project.commit.slice(0, 12)}\u3002\u5B83\u5B8C\u6210\u540E\u4F1A\u63A8\u9001\u5230 ${project.branch}\uFF0C\u5C4A\u65F6\u5728\u672C\u673A git pull \u540E\u5BA1\u67E5\u3002`;
+      return `${WORKER_PREFIX} worker\u300C${node.name}\u300D\u4F1A\u8BDD\u300C${name}\u300D\u5DF2\u542F\u52A8\uFF08id ${id}\uFF09\u3002\u4EE3\u7801\u5DF2${workspace.cloned ? "\u514B\u9686" : "\u66F4\u65B0"}\u5230 ${workspace.codeDir}\uFF0C\u8D77\u70B9 ${handover.start}@${handover.commit.slice(0, 12)}\u3002\u5B83\u5B8C\u6210\u540E\u4F1A\u63A8\u9001\u5230 ${handover.deliver}\uFF0C\u5C4A\u65F6\u5728\u672C\u673A git fetch origin ${handover.deliver} \u540E\u5BA1\u67E5\u3002`;
     } catch (error2) {
       if (sessionDir) await node.removeWorkspace(sessionDir, true).catch(() => {
       });
@@ -22487,7 +22556,7 @@ var Master = class {
       return `\uFF08\u51C6\u5907\u4E2D\uFF09${name}  ${job.phase}\uFF0C\u5DF2\u7528 ${seconds} \u79D2${job.progress ? `  [${job.progress}]` : ""}`;
     });
   }
-  /** The project a dispatch hands to the worker, refused when the worker could not see the same code. */
+  /** The code a dispatch hands to the worker, refused when the worker could not see the same code. */
   async projectToHandOver(args) {
     const dir = args.project_dir?.trim() || process.cwd();
     const project = await inspectProject(dir);
@@ -22496,14 +22565,24 @@ var Master = class {
         `${dir} \u4E0D\u5728 git \u4ED3\u5E93\u91CC\uFF0C\u65E0\u6CD5\u628A\u9879\u76EE\u4EA4\u7ED9 worker\u3002\u8981\u6D3E\u53D1\u4E0E\u4EE3\u7801\u65E0\u5173\u7684\u4EFB\u52A1\uFF0C\u8BF7\u7528 cwd \u6307\u5B9A worker \u4E0A\u4E00\u4E2A\u5DF2\u4FE1\u4EFB\u7684\u76EE\u5F55\uFF1B\u8981\u6D3E\u53D1\u522B\u7684\u9879\u76EE\uFF0C\u8BF7\u7528 project_dir \u6307\u5B9A\u5B83\u5728\u672C\u673A\u7684\u8DEF\u5F84\u3002`
       );
     }
+    const deliverArg = args.deliver_branch?.trim() ? await checkBranchName(project.dir, args.deliver_branch) : void 0;
+    if (args.base_ref?.trim()) {
+      const start = await resolveStart(project, args.base_ref);
+      return {
+        project,
+        commit: start.commit,
+        start: start.branch ?? args.base_ref.trim(),
+        deliver: deliverArg ?? start.branch ?? project.branch
+      };
+    }
     const problems = syncProblems(project);
     if (problems.length && !args.allow_unsynced) {
       throw new ToolError(
         `\u6CA1\u6709\u6D3E\u53D1\uFF1A${project.dir} ${problems.join("\uFF0C")}\uFF0Cworker \u4ECE\u8FDC\u7AEF\u62FF\u4E0D\u5230\u8FD9\u4E9B\u5185\u5BB9\u3002
-\u8BF7\u5148\u63D0\u4EA4\u5E76\u63A8\u9001\u518D\u91CD\u8BD5\u3002\u5982\u679C\u4EFB\u52A1\u4E0D\u9700\u8981\u672A\u63D0\u4EA4\u7684\u6539\u52A8\uFF0C\u53EF\u4EE5\u52A0 allow_unsynced=true\uFF1Aworker \u4F1A\u4ECE\u672C\u673A\u5F53\u524D\u63D0\u4EA4 ${project.commit.slice(0, 12)} \u5F00\u59CB\uFF0C\u8FD9\u4E2A\u63D0\u4EA4\u5FC5\u987B\u5DF2\u5728\u8FDC\u7AEF\u3002`
+\u8BF7\u5148\u63D0\u4EA4\u5E76\u63A8\u9001\u518D\u91CD\u8BD5\u3002\u5982\u679C\u4EFB\u52A1\u4E0D\u9700\u8981\u672A\u63D0\u4EA4\u7684\u6539\u52A8\uFF0C\u53EF\u4EE5\u52A0 allow_unsynced=true\uFF1Aworker \u4F1A\u4ECE\u672C\u673A\u5F53\u524D\u63D0\u4EA4 ${project.commit.slice(0, 12)} \u5F00\u59CB\uFF0C\u8FD9\u4E2A\u63D0\u4EA4\u5FC5\u987B\u5DF2\u5728\u8FDC\u7AEF\u3002\u4E5F\u53EF\u4EE5\u7528 base_ref \u6307\u5B9A\u4ECE\u8FDC\u7AEF\u7684\u67D0\u4E2A\u5206\u652F\u3001\u6807\u7B7E\u6216\u63D0\u4EA4\u5F00\u59CB\u3002`
       );
     }
-    return project;
+    return { project, commit: project.commit, start: project.branch, deliver: deliverArg ?? project.branch };
   }
   /** Stops a session, deletes it and cleans up its worktree. */
   async remove(args) {
@@ -22550,7 +22629,8 @@ ${usage.lines.join("\n")}
     if (!message) throw new ToolError("message \u4E0D\u80FD\u4E3A\u7A7A\u3002");
     const session2 = await node.findSession(args.session);
     if (hasExited(session2)) return this.relaunch(node, session2, message);
-    await this.channels.ensure(node);
+    const channel = await this.channels.ensure(node);
+    if (session2.name) await this.bind(node, session2.name, channel);
     await node.post(session2, masterMessage(message));
     const when = session2.status === "busy" ? "\u5B83\u6B63\u5728\u5DE5\u4F5C\uFF0C\u4F1A\u5728\u5F53\u524D\u5DE5\u5177\u8C03\u7528\u7ED3\u675F\u540E\u8BFB\u5230\u3002" : session2.status === "waiting" ? `\u5B83\u6B63\u5361\u5728\u300C${session2.waitingFor ?? "\u7B49\u5F85\u8F93\u5165"}\u300D\u4E0A\uFF0C\u6D88\u606F\u5DF2\u6392\u961F\uFF0C\u8981\u7B49\u90A3\u4E2A\u786E\u8BA4\u88AB\u5904\u7406\u540E\u624D\u4F1A\u8BFB\u5230\u3002\u5982\u679C\u662F\u5728\u7B49\u4F60\u7B54\u590D\u6743\u9650\u8BF7\u6C42\u6216\u63D0\u95EE\uFF0C\u7528 worker_pending \u67E5\u770B\u5E76\u7528 worker_answer \u7B54\u590D\u3002` : "\u5B83\u5904\u4E8E\u7A7A\u95F2\uFF0C\u5DF2\u88AB\u5524\u9192\u3002";
     return `\u5DF2\u9001\u8FBE\u4F1A\u8BDD ${session2.id}\uFF08${session2.name ?? "\u672A\u547D\u540D"}\uFF09\u3002${when}`;
@@ -22569,18 +22649,24 @@ ${usage.lines.join("\n")}
     if (!session2.sessionId) throw new ToolError(`\u4F1A\u8BDD ${session2.id} \u6CA1\u6709\u53EF\u7EED\u8DD1\u7684\u5BF9\u8BDD\u8BB0\u5F55\u3002`);
     const channel = await this.channels.ensure(node);
     const name = session2.name ?? randomName();
+    const launched = session2.name ? await node.getRoute(session2.name) : void 0;
+    const mode = permissionMode2 ?? launched?.permissionMode ?? node.config.permissionMode;
+    const model = launched?.model;
+    await this.bind(node, name, channel, { permissionMode: mode, model });
     const id = await node.launch({
       cwd: session2.cwd ?? "~",
       name,
       prompt: masterMessage(message || "\u4E3B\u8282\u70B9\u8BA9\u4F60\u4ECE\u4E0A\u6B21\u505C\u4E0B\u7684\u5730\u65B9\u7EE7\u7EED\u3002"),
-      permissionMode: permissionMode2 ?? node.config.permissionMode,
+      permissionMode: mode,
+      model,
       resumeSessionId: session2.sessionId,
       channel
     });
     this.remember(node, name);
     const changed = id === session2.id ? "" : `
 \u6CE8\u610F\uFF1A\u7EED\u8DD1\u540E\u7684\u4F1A\u8BDD id \u53D8\u6210\u4E86 ${id}\u3002`;
-    return `\u4F1A\u8BDD ${session2.id} \u7684\u8FDB\u7A0B\u5DF2\u9000\u51FA\uFF0C\u5DF2\u5728\u540E\u53F0\u7EED\u8DD1${message ? "\u5E76\u5E26\u4E0A\u4E86\u4F60\u7684\u6D88\u606F" : ""}\u3002\u5F53\u524D id\uFF1A${id}${changed}`;
+    const how = `\u6743\u9650\u6A21\u5F0F ${mode}${model ? `\uFF0C\u6A21\u578B ${model}` : ""}`;
+    return `\u4F1A\u8BDD ${session2.id} \u7684\u8FDB\u7A0B\u5DF2\u9000\u51FA\uFF0C\u5DF2\u5728\u540E\u53F0\u7EED\u8DD1${message ? "\u5E76\u5E26\u4E0A\u4E86\u4F60\u7684\u6D88\u606F" : ""}\uFF08${how}\uFF09\u3002\u5F53\u524D id\uFF1A${id}${changed}`;
   }
   // ---- permission prompts and questions
   async pending(args) {
@@ -22589,7 +22675,13 @@ ${usage.lines.join("\n")}
     const blocks = await Promise.all(
       names.map(async (name) => {
         try {
-          return (await this.resolve(name).node.pendingRequests()).map(requestMessage);
+          const all2 = await this.resolve(name).node.pendingRequests();
+          const mine = all2.filter((request) => this.owns(request));
+          const others = all2.length - mine.length;
+          return [
+            ...mine.map(requestMessage),
+            ...others ? [`worker\u300C${name}\u300D\u4E0A\u53E6\u6709 ${others} \u4E2A\u8BF7\u6C42\u5C5E\u4E8E\u5176\u4ED6\u4E3B\u4F1A\u8BDD\u6D3E\u53D1\u7684\u4F1A\u8BDD\uFF0C\u7531\u5B83\u4EEC\u5904\u7406\uFF0C\u8FD9\u91CC\u4E0D\u5217\u51FA\u3002`] : []
+          ];
         } catch (error2) {
           return [`worker\u300C${name}\u300D\uFF1A\u65E0\u6CD5\u67E5\u8BE2\uFF08${errorText(error2, 200)}\uFF09`];
         }
@@ -22616,7 +22708,7 @@ ${usage.lines.join("\n")}
     } else {
       throw new ToolError('\u8BF7\u7ED9\u51FA\u7B54\u590D\uFF1A\u6743\u9650\u8BF7\u6C42\u7528 decision="allow" \u6216 "deny"\uFF0C\u63D0\u95EE\u7528 answers\u3002');
     }
-    const request = await node.answerRequest(id, answer);
+    const request = await node.answerRequest(id, answer, this.channels.masterId);
     const target = `worker\u300C${node.name}\u300D\u4F1A\u8BDD\u300C${request.session}\u300D`;
     if (answer.kind === "question") return `\u5DF2\u628A\u7B54\u6848\u4EA4\u7ED9${target}\uFF0C\u5B83\u4F1A\u63A5\u7740\u5DE5\u4F5C\u3002`;
     if (answer.decision === "deny") return `\u5DF2\u62D2\u7EDD${target}\u7684\u8BF7\u6C42 #${id}\uFF0C\u5B83\u4F1A\u6536\u5230\u62D2\u7EDD\u7406\u7531\u3002`;
@@ -22650,7 +22742,8 @@ ${lines.join("\n")}`;
       Object.keys(config2.workers).map(async (name) => {
         try {
           const { node } = this.resolve(name);
-          const [sessions, pending] = await Promise.all([node.sessions(), node.pendingRequests().catch(() => [])]);
+          const [sessions, all] = await Promise.all([node.sessions(), node.pendingRequests().catch(() => [])]);
+          const pending = all.filter((request) => this.owns(request));
           const waiting = pending.length ? `\uFF0C${pending.length} \u4E2A\u8BF7\u6C42\u7B49\u5F85\u7B54\u590D\uFF08\u7528 worker_pending \u67E5\u770B\uFF09` : "";
           const link = this.channels.isOpen(name) ? "\u901A\u9053\u5DF2\u8FDE\u63A5" : "\u901A\u9053\u672A\u8FDE\u63A5\uFF08\u6D3E\u53D1\u6216\u53D1\u6D88\u606F\u65F6\u81EA\u52A8\u5EFA\u7ACB\uFF09";
           const lines = [...this.describePreparing(name), ...sessions.map(describeSession)];
@@ -22739,7 +22832,7 @@ ${rows.join("\n")}`;
 };
 
 // src/master/main.ts
-var INSTRUCTIONS = "agent-remote-worker\uFF1A\u628A\u4EFB\u52A1\u6D3E\u7ED9\u5176\u4ED6\u673A\u5668\u4E0A\u7684 Claude Code \u4F1A\u8BDD\uFF08remote worker\uFF09\uFF0C\u5B83\u4EEC\u7528\u7684\u662F\u53E6\u4E00\u4E2A\u8D26\u53F7\u7684\u989D\u5EA6\u3002\u548C\u5185\u7F6E Sub Agent \u4E0D\u540C\uFF1Aworker \u5728\u53E6\u4E00\u53F0\u673A\u5668\u3001\u53E6\u4E00\u4E2A\u8D26\u53F7\u3001\u72EC\u7ACB\u7684\u4EE3\u7801\u526F\u672C\u4E0A\u8FD0\u884C\uFF0C\u770B\u4E0D\u5230\u672C\u4F1A\u8BDD\u7684\u4E0A\u4E0B\u6587\u548C\u6587\u4EF6\uFF0C\u6240\u4EE5 worker_dispatch \u7684 task \u5FC5\u987B\u81EA\u5305\u542B\uFF08\u76EE\u6807\u3001\u8FB9\u754C\u3001\u9A8C\u6536\u6807\u51C6\uFF09\u3002\u4EE3\u7801\u901A\u8FC7 Git \u8FDC\u7AEF\u540C\u6B65\uFF1A\u6D3E\u53D1\u524D\u672C\u673A\u4EE3\u7801\u8981\u5DF2\u63D0\u4EA4\u5E76\u63A8\u9001\uFF0Cworker \u9ED8\u8BA4\u628A\u7ED3\u679C\u63A8\u56DE\u672C\u673A\u5F53\u524D\u6240\u5728\u7684\u5206\u652F\uFF0C\u7531\u4F60 git pull \u540E\u5BA1\u67E5\u3002worker \u7684\u6743\u9650\u8BF7\u6C42\u548C\u63D0\u95EE\u4F1A\u8F6C\u7ED9\u4F60\uFF0Cworker \u5728\u539F\u5730\u7B49\u5F85\uFF1A\u7528 worker_answer \u6309\u7F16\u53F7\u7B54\u590D\u3002\u4EFB\u52A1\u8303\u56F4\u5185\u4F60\u80FD\u5B9A\u7684\u76F4\u63A5\u7B54\u590D\uFF0C\u9700\u6C42\u53D6\u820D\u3001\u6709\u98CE\u9669\u6216\u4E0D\u53EF\u9006\u7684\u64CD\u4F5C\u3001\u8D85\u51FA\u539F\u4EFB\u52A1\u8303\u56F4\u7684\u4E8B\u5148\u95EE\u7528\u6237\u3002\u7528\u6237\u8981\u6C42\u6D3E\u7ED9 worker \u65F6\u624D\u6D3E\u53D1\u3002\u6D3E\u53D1\u540E\u4E0D\u9700\u8981\u8F6E\u8BE2\uFF1Aworker \u7684\u6C47\u62A5\u548C\u63D0\u95EE\u4F1A\u4F5C\u4E3A\u4EE5 [agent-remote-worker] \u5F00\u5934\u7684\u6D88\u606F\u81EA\u52A8\u51FA\u73B0\uFF0C\u7528 worker_send \u56DE\u590D\u3002\u6D3E\u53D1\u524D\u4F1A\u81EA\u52A8\u68C0\u67E5 worker \u7684\u989D\u5EA6\u3002\u8BE6\u7EC6\u505A\u6CD5\u89C1 agent-remote-worker:dispatch skill\u3002";
+var INSTRUCTIONS = "agent-remote-worker\uFF1A\u628A\u4EFB\u52A1\u6D3E\u7ED9\u5176\u4ED6\u673A\u5668\u4E0A\u7684 Claude Code \u4F1A\u8BDD\uFF08remote worker\uFF09\uFF0C\u5B83\u4EEC\u7528\u7684\u662F\u53E6\u4E00\u4E2A\u8D26\u53F7\u7684\u989D\u5EA6\u3002\u548C\u5185\u7F6E Sub Agent \u4E0D\u540C\uFF1Aworker \u5728\u53E6\u4E00\u53F0\u673A\u5668\u3001\u53E6\u4E00\u4E2A\u8D26\u53F7\u3001\u72EC\u7ACB\u7684\u4EE3\u7801\u526F\u672C\u4E0A\u8FD0\u884C\uFF0C\u770B\u4E0D\u5230\u672C\u4F1A\u8BDD\u7684\u4E0A\u4E0B\u6587\u548C\u6587\u4EF6\uFF0C\u6240\u4EE5 worker_dispatch \u7684 task \u5FC5\u987B\u81EA\u5305\u542B\uFF08\u76EE\u6807\u3001\u8FB9\u754C\u3001\u9A8C\u6536\u6807\u51C6\uFF09\u3002\u4EE3\u7801\u901A\u8FC7 Git \u8FDC\u7AEF\u540C\u6B65\uFF1A\u6D3E\u53D1\u524D\u672C\u673A\u4EE3\u7801\u8981\u5DF2\u63D0\u4EA4\u5E76\u63A8\u9001\uFF0Cworker \u9ED8\u8BA4\u4ECE\u672C\u673A\u5F53\u524D\u63D0\u4EA4\u5F00\u59CB\u3001\u628A\u7ED3\u679C\u63A8\u56DE\u672C\u673A\u5F53\u524D\u6240\u5728\u7684\u5206\u652F\uFF1B\u7528 base_ref \u6307\u5B9A\u4ECE\u8FDC\u7AEF\u522B\u7684\u5206\u652F\u6216\u63D0\u4EA4\u5F00\u59CB\uFF0C\u7528 deliver_branch \u6307\u5B9A\u63A8\u5230\u54EA\u4E2A\u5206\u652F\uFF08\u4F8B\u5982\u4E00\u4E2A\u5355\u72EC\u7684\u5206\u652F\uFF0C\u5BA1\u67E5\u540E\u518D\u5408\u5E76\uFF09\u3002worker \u7684\u6743\u9650\u8BF7\u6C42\u548C\u63D0\u95EE\u4F1A\u8F6C\u7ED9\u4F60\uFF0Cworker \u5728\u539F\u5730\u7B49\u5F85\uFF1A\u7528 worker_answer \u6309\u7F16\u53F7\u7B54\u590D\u3002\u4EFB\u52A1\u8303\u56F4\u5185\u4F60\u80FD\u5B9A\u7684\u76F4\u63A5\u7B54\u590D\uFF0C\u9700\u6C42\u53D6\u820D\u3001\u6709\u98CE\u9669\u6216\u4E0D\u53EF\u9006\u7684\u64CD\u4F5C\u3001\u8D85\u51FA\u539F\u4EFB\u52A1\u8303\u56F4\u7684\u4E8B\u5148\u95EE\u7528\u6237\u3002\u7528\u6237\u8981\u6C42\u6D3E\u7ED9 worker \u65F6\u624D\u6D3E\u53D1\u3002\u6D3E\u53D1\u540E\u4E0D\u9700\u8981\u8F6E\u8BE2\uFF1Aworker \u7684\u6C47\u62A5\u548C\u63D0\u95EE\u4F1A\u4F5C\u4E3A\u4EE5 [agent-remote-worker] \u5F00\u5934\u7684\u6D88\u606F\u81EA\u52A8\u51FA\u73B0\uFF0C\u7528 worker_send \u56DE\u590D\u3002\u6D3E\u53D1\u524D\u4F1A\u81EA\u52A8\u68C0\u67E5 worker \u7684\u989D\u5EA6\u3002\u8BE6\u7EC6\u505A\u6CD5\u89C1 agent-remote-worker:dispatch skill\u3002";
 var worker = external_exports.string().optional().describe("\u8282\u70B9\u540D\uFF08workers.json \u91CC\u7684\u952E\uFF09\uFF1B\u53EA\u6709\u4E00\u4E2A\u8282\u70B9\u65F6\u53EF\u7701\u7565");
 var session = external_exports.string().describe("\u4F1A\u8BDD id \u6216\u540D\u5B57");
 var permissionMode = external_exports.enum(PERMISSION_MODES).optional().describe("\u8986\u76D6\u8282\u70B9\u9ED8\u8BA4\u7684\u6743\u9650\u6A21\u5F0F");
@@ -22755,6 +22848,8 @@ server.registerTool(
       project_dir: external_exports.string().optional().describe("\u8981\u4EA4\u7ED9 worker \u7684\u9879\u76EE\u5728\u672C\u673A\u7684\u8DEF\u5F84\uFF1B\u7701\u7565\u65F6\u7528\u672C\u4F1A\u8BDD\u6240\u5728\u7684\u9879\u76EE"),
       cwd: external_exports.string().optional().describe("\u6539\u4E3A\u5728 worker \u4E0A\u8FD9\u4E2A\u73B0\u6210\u7684\u5DF2\u4FE1\u4EFB\u76EE\u5F55\u91CC\u8FD0\u884C\uFF0C\u4E0D\u51C6\u5907\u4EE3\u7801\uFF1B\u53EA\u7528\u4E8E\u4E0E\u672C\u673A\u9879\u76EE\u65E0\u5173\u7684\u4EFB\u52A1"),
       allow_unsynced: external_exports.boolean().optional().describe("\u672C\u673A\u6709\u672A\u63A8\u9001\u6216\u672A\u63D0\u4EA4\u7684\u6539\u52A8\u65F6\u4ECD\u7136\u6D3E\u53D1"),
+      base_ref: external_exports.string().optional().describe("\u4ECE origin \u4E0A\u7684\u8FD9\u4E2A\u5206\u652F\u3001\u6807\u7B7E\u6216\u63D0\u4EA4\u5F00\u59CB\uFF0C\u800C\u4E0D\u662F\u672C\u673A\u5F53\u524D\u63D0\u4EA4\uFF1B\u7ED9\u4E86\u5B83\u5C31\u4E0D\u68C0\u67E5\u672C\u673A\u662F\u5426\u5DF2\u63A8\u9001\u3002\u4F8B\u5982\u53E6\u4E00\u4E2A worker \u63A8\u9001\u7684\u5206\u652F"),
+      deliver_branch: external_exports.string().optional().describe("worker \u5B8C\u6210\u540E\u63A8\u9001\u5230\u7684\u5206\u652F\uFF0C\u53EF\u4EE5\u662F\u8FDC\u7AEF\u8FD8\u6CA1\u6709\u7684\u65B0\u5206\u652F\uFF1B\u7701\u7565\u65F6\u7528 base_ref \u6307\u5B9A\u7684\u5206\u652F\uFF0C\u518D\u6CA1\u6709\u5C31\u7528\u672C\u673A\u5F53\u524D\u5206\u652F"),
       name: external_exports.string().optional().describe("\u4F1A\u8BDD\u540D\u5B57"),
       model: external_exports.string().optional().describe("\u6A21\u578B"),
       permission_mode: permissionMode,
@@ -22766,7 +22861,7 @@ server.registerTool(
 server.registerTool(
   "worker_send",
   {
-    description: "\u7ED9 worker \u4F1A\u8BDD\u53D1\u4E00\u6761\u6D88\u606F\uFF08\u8FFD\u52A0\u8981\u6C42\u3001\u56DE\u7B54\u5B83\u7684\u63D0\u95EE\u3001\u8BE2\u95EE\u8FDB\u5EA6\uFF09\u3002\u5FD9\u65F6\u5B83\u4F1A\u5728\u5F53\u524D\u5DE5\u5177\u8C03\u7528\u7ED3\u675F\u540E\u8BFB\u5230\uFF0C\u7A7A\u95F2\u65F6\u88AB\u5524\u9192\uFF0C\u8FDB\u7A0B\u5DF2\u9000\u51FA\u65F6\u81EA\u52A8\u7EED\u8DD1\u3002",
+    description: "\u7ED9 worker \u4F1A\u8BDD\u53D1\u4E00\u6761\u6D88\u606F\uFF08\u8FFD\u52A0\u8981\u6C42\u3001\u56DE\u7B54\u5B83\u7684\u63D0\u95EE\u3001\u8BE2\u95EE\u8FDB\u5EA6\uFF09\u3002\u5FD9\u65F6\u5B83\u4F1A\u5728\u5F53\u524D\u5DE5\u5177\u8C03\u7528\u7ED3\u675F\u540E\u8BFB\u5230\uFF0C\u7A7A\u95F2\u65F6\u88AB\u5524\u9192\uFF0C\u8FDB\u7A0B\u5DF2\u9000\u51FA\u65F6\u81EA\u52A8\u7EED\u8DD1\uFF08\u6CBF\u7528\u6D3E\u53D1\u65F6\u7684\u6743\u9650\u6A21\u5F0F\u548C\u6A21\u578B\uFF09\u3002\u53D1\u6D88\u606F\u540E\uFF0C\u8FD9\u4E2A\u4F1A\u8BDD\u7684\u6C47\u62A5\u548C\u8BF7\u6C42\u90FD\u4EA4\u7ED9\u672C\u4F1A\u8BDD\uFF0C\u5373\u4F7F\u5B83\u539F\u6765\u662F\u522B\u7684\u4E3B\u4F1A\u8BDD\u6D3E\u53D1\u7684\u3002",
     inputSchema: { worker, session, message: external_exports.string() }
   },
   textTool((args) => master.send(args))
@@ -22790,7 +22885,7 @@ server.registerTool(
 server.registerTool(
   "worker_pending",
   {
-    description: "\u5217\u51FA worker \u4F1A\u8BDD\u6B63\u5728\u7B49\u5F85\u7B54\u590D\u7684\u6743\u9650\u8BF7\u6C42\u548C\u63D0\u95EE\u3002\u901A\u9053\u65AD\u8FC7\u3001\u6216\u60F3\u786E\u8BA4\u6709\u6CA1\u6709\u6F0F\u6389\u7684\u8BF7\u6C42\u65F6\u4F7F\u7528\u3002",
+    description: "\u5217\u51FA\u672C\u4F1A\u8BDD\u6D3E\u53D1\u7684 worker \u4F1A\u8BDD\u6B63\u5728\u7B49\u5F85\u7B54\u590D\u7684\u6743\u9650\u8BF7\u6C42\u548C\u63D0\u95EE\u3002\u901A\u9053\u65AD\u8FC7\u3001\u6216\u60F3\u786E\u8BA4\u6709\u6CA1\u6709\u6F0F\u6389\u7684\u8BF7\u6C42\u65F6\u4F7F\u7528\u3002\u5176\u4ED6\u4E3B\u4F1A\u8BDD\u6D3E\u53D1\u7684\u4F1A\u8BDD\u7684\u8BF7\u6C42\u53EA\u7ED9\u51FA\u6570\u91CF\u3002",
     inputSchema: { worker }
   },
   textTool((args) => master.pending(args))
@@ -22822,8 +22917,13 @@ server.registerTool(
 server.registerTool(
   "worker_resume",
   {
-    description: "\u628A\u5DF2\u505C\u6B62\u6216\u8FDB\u7A0B\u5DF2\u9000\u51FA\u7684 worker \u4F1A\u8BDD\u5728\u540E\u53F0\u91CD\u65B0\u62C9\u8D77\uFF0C\u4FDD\u7559\u539F\u6709\u4E0A\u4E0B\u6587\uFF0C\u53EF\u9644\u4E00\u6761\u65B0\u6307\u4EE4\u3002",
-    inputSchema: { worker, session, message: external_exports.string().optional(), permission_mode: permissionMode }
+    description: "\u628A\u5DF2\u505C\u6B62\u6216\u8FDB\u7A0B\u5DF2\u9000\u51FA\u7684 worker \u4F1A\u8BDD\u5728\u540E\u53F0\u91CD\u65B0\u62C9\u8D77\uFF0C\u4FDD\u7559\u539F\u6709\u4E0A\u4E0B\u6587\uFF0C\u53EF\u9644\u4E00\u6761\u65B0\u6307\u4EE4\u3002\u9ED8\u8BA4\u6CBF\u7528\u6D3E\u53D1\u65F6\u7684\u6743\u9650\u6A21\u5F0F\u548C\u6A21\u578B\u3002",
+    inputSchema: {
+      worker,
+      session,
+      message: external_exports.string().optional(),
+      permission_mode: permissionMode.describe("\u6362\u4E00\u4E2A\u6743\u9650\u6A21\u5F0F\u7EED\u8DD1\uFF0C\u4E4B\u540E\u7684\u81EA\u52A8\u7EED\u8DD1\u4E5F\u6CBF\u7528\u5B83\uFF1B\u7701\u7565\u65F6\u6CBF\u7528\u4E0A\u6B21\u7684")
+    }
   },
   textTool((args) => master.resume(args))
 );

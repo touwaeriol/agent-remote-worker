@@ -15,6 +15,7 @@ import {
 } from "../shared/protocol.ts";
 import { ToolError } from "../shared/tooling.ts";
 import type { PrepResult } from "../worker/cli.ts";
+import type { Route } from "../worker/routes.ts";
 import type { RemoveRequest, Workspace, WorkspaceRequest } from "../worker/workspace.ts";
 import { HOOK_TIMEOUT_MAX, type WorkerConfig } from "./config.ts";
 import { SshHost, shPath, shq } from "./exec.ts";
@@ -279,9 +280,32 @@ export class WorkerNode {
     await this.ssh.execOk(`${this.claude} stop ${shq(session.id)}`, "停止会话");
   }
 
-  /** Deletes a stopped session's record on the worker. */
+  /** Deletes a stopped session's record on the worker, and its route. */
   async forget(session: RemoteSession): Promise<void> {
     await this.ssh.execOk(`${this.claude} rm ${shq(session.id)}`, "删除会话");
+    if (session.name) await this.ssh.exec(this.helper(`unroute ${shq(session.name)}`)).catch(() => {});
+  }
+
+  // ---- routes: which master session a worker session reports to
+
+  /**
+   * Points the session's reports and requests at this master session; fields
+   * left out (such as the launch settings) keep their value, null clears one.
+   */
+  async setRoute(sessionName: string, route: { [K in keyof Route]?: Route[K] | null }): Promise<void> {
+    await this.ensureScript();
+    await this.ssh.execOk(this.helper(`route ${shq(sessionName)}`), "绑定会话到本主会话", { input: JSON.stringify(route) });
+  }
+
+  /** The session's route, if it has one. */
+  async getRoute(sessionName: string): Promise<Route | undefined> {
+    await this.ensureScript();
+    const out = await this.ssh.execOk(this.helper(`route-show ${shq(sessionName)}`), "读取会话的启动参数");
+    try {
+      return (JSON.parse(out.trim().split("\n").at(-1) ?? "null") as Route | null) ?? undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   // ---- permission prompts and questions
@@ -298,9 +322,9 @@ export class WorkerNode {
   }
 
   /** Hands an answer to the session waiting on request `id`; returns that request. */
-  async answerRequest(id: string, answer: RequestAnswer): Promise<PendingRequest> {
+  async answerRequest(id: string, answer: RequestAnswer, masterId: string): Promise<PendingRequest> {
     await this.ensureScript();
-    const result = await this.ssh.exec(this.helper(`answer ${shq(id)}`), { input: JSON.stringify(answer) });
+    const result = await this.ssh.exec(this.helper(`answer ${shq(id)} ${shq(masterId)}`), { input: JSON.stringify(answer) });
     if (result.code === 5) throw new ToolError(result.stderr.trim());
     if (result.code !== 0) {
       throw new ToolError(`答复请求失败（退出码 ${result.code}）：${(result.stderr || result.stdout).trim().slice(-400)}`);

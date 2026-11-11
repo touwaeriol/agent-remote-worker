@@ -61,9 +61,11 @@ export function masterMessage(body: string): string {
 /** The code a session was given to work on, as prepared by the master. */
 export interface CodeBase {
   url: string;
-  /** The master's branch, which finished work is pushed back to. */
-  branch: string;
+  /** What the session starts from, as the master named it: its branch, or the base_ref it was given. */
+  start: string;
   commit: string;
+  /** The branch finished work is pushed to. */
+  deliver: string;
   /** The local branch of the session's own worktree. */
   localBranch: string;
   /** The worktree on the worker. */
@@ -71,13 +73,14 @@ export interface CodeBase {
 }
 
 function codeRules(code: CodeBase): string[] {
+  const deliver = code.deliver;
   return [
     "",
     "代码：",
     `- 项目已经为这次任务准备好，在 ${code.dir}（当前目录下的子目录）。所有文件和 git 操作都在那里进行，不需要再克隆。`,
-    `- 它是仓库 ${code.url} 的一个独立 git worktree，本地分支 ${code.localBranch}，起点是主节点的提交 ${code.commit.slice(0, 12)}（主节点的分支：${code.branch}）。`,
+    `- 它是仓库 ${code.url} 的一个独立 git worktree，本地分支 ${code.localBranch}，起点是 ${code.start} 的提交 ${code.commit.slice(0, 12)}。`,
     "- 你和主节点通过 Git 远端同步代码。你拥有与主节点相同的仓库权限，密钥已经配置好，可以直接 fetch 和 push。",
-    `- 交付方式：提交后执行 git fetch origin && git rebase origin/${code.branch}，再 git push origin HEAD:${code.branch}。任务里指定了别的分支时以任务为准。`,
+    `- 交付分支：${deliver}。提交后执行 git fetch origin；如果远端已有这个分支（git ls-remote --exit-code --heads origin ${deliver} 成功），先 git rebase origin/${deliver}；然后 git push origin HEAD:${deliver}。`,
     "- 推送被拒绝就重新 fetch、rebase 再推。不要强制推送；冲突解决不了时用 ask_master。",
     "- 完成汇报里写明推送到的分支和提交号，主节点会拉取后审查。",
   ];
@@ -106,6 +109,12 @@ export interface PendingRequest {
   toolInput: Record<string, unknown>;
   /** What Claude Code offered for "don't ask again", for a permission prompt. */
   suggestions?: unknown[];
+  /**
+   * The master session the request's session reports to, as it stands now
+   * (filled in when the request is listed). Missing for sessions started by an
+   * older version, which any master may answer.
+   */
+  master?: string;
 }
 
 export type RequestAnswer =

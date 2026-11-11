@@ -16,7 +16,7 @@ Claude Code 插件 `agent-remote-worker`。
 - 主节点安装本插件，得到 11 个 `worker_*` 工具。
 - 派发时，插件读取主节点当前项目的仓库地址、分支和提交，经 SSH 在 worker 上克隆或更新这个项目，为这次任务建一个独立的 git worktree，再用 `claude --bg` 在里面启动后台会话。这一步在后台进行，完成后主会话会收到通知。
 - 插件把 `dist/worker.js` 复制到 worker，给会话提供 `report_to_master` 和 `ask_master` 两个工具。worker 上不需要安装任何东西。
-- 代码只通过 Git 远端同步：主节点先推送，worker 拉取；worker 完成后推送，主节点拉取。
+- 代码只通过 Git 远端同步：主节点先推送，worker 拉取；worker 完成后推送，主节点拉取。起点和交付分支都可以在派发时指定（见下文“分支”）。
 - 消息走 Claude Code 自带的会话收件箱（inbox socket）：主节点经 SSH 写 worker 会话的收件箱；worker 经一条 SSH 反向映射写主会话的收件箱。主节点不需要开放任何端口。
 
 ## 前提
@@ -79,10 +79,10 @@ Claude Code 插件 `agent-remote-worker`。
 | 工具 | 作用 |
 | --- | --- |
 | `worker_dispatch` | 把当前项目交给 worker 并启动后台会话执行任务；也可以指定 worker 上的现成目录 |
-| `worker_send` | 给会话发消息；进程已退出时自动续跑 |
+| `worker_send` | 给会话发消息；进程已退出时自动续跑。发消息的主会话从此接收这个会话的汇报和请求 |
 | `worker_status` | 查看会话状态 |
 | `worker_stop` | 停止会话，对话保留 |
-| `worker_resume` | 续跑已停止的会话 |
+| `worker_resume` | 续跑已停止的会话，默认沿用派发时的权限模式和模型 |
 | `worker_remove` | 删除会话并清理它的 worktree；有未推送内容时拒绝 |
 | `worker_usage` | 查主节点和各 worker 的额度 |
 | `worker_list` | 列出节点和会话 |
@@ -106,6 +106,23 @@ worker 会话旁边没有人，所以它的权限确认和内置提问（`AskUse
 - **主节点不在线**：钩子立即返回。权限请求按拒绝处理，提问让 worker 自行决定并在汇报里说明。
 - **通道恢复后**：主节点会把仍在等待的请求重新推送一遍，`worker_list` 也会显示每个节点有几个请求在等。
 - **节点配置 `approval: "user"`**：`worker_answer` 必须带 `user_confirmed=true`，也就是主节点必须先问过你。
+
+## 分支
+
+`worker_dispatch` 默认让 worker 从本机当前提交开始，完成后推回本机当前所在的分支。两个参数可以改变这一点：
+
+- `base_ref`：从 origin 上的某个分支、标签或提交开始，例如另一个 worker 推送的分支。给了它就不再检查本机有没有推送。
+- `deliver_branch`：worker 完成后推到这个分支，可以是远端还没有的新分支。想先审查再合并时，给它一个单独的分支名。
+
+不给 `deliver_branch` 时，交付分支依次取 `base_ref` 指定的分支、本机当前分支。worker 推送前会先 fetch，远端已有交付分支时 rebase 到它上面，没有就直接推出新分支。
+
+## 多个主会话
+
+每个主会话在每台 worker 上有自己的反向通道，以主会话的 id 区分，同一台机器上开几个主会话也不会互相抢消息。worker 会话记得自己归哪个主会话（`~/.agent-remote-worker/routes/<会话名>.json`）：
+
+- 派发、发消息或续跑某个会话的主会话，从此接收它的汇报、提问和权限请求。
+- `worker_pending` 只列出本主会话的请求，`worker_answer` 拒绝答复别的主会话的请求。要接管别人派发的会话，先用 `worker_send` 给它发一条消息。
+- 同一个文件还记着会话的权限模式和模型，续跑时沿用。`worker_resume` 带上 `permission_mode` 会改掉它，之后的自动续跑也沿用新的。
 
 ## worker 上的目录
 
@@ -131,13 +148,13 @@ Claude Code 只在已信任的目录里启动后台会话，信任记录在 work
 
 - **消息格式没有公开文档。** 收件箱本身是 Claude Code 文档写明的功能，但每行消息的写法不是。Claude Code 升级后如果格式变了，只需要改 `src/shared/inbox.ts` 里的 `inboxFrame`。
 - **消息不持久化。** 主节点不在线时，worker 的工具会返回“未送达”；通道恢复后主节点会让 worker 重新汇报。
-- **同一时间只有一个主会话接收某个 worker 的消息。** 最后一个派发或发消息的主会话接管通道。
+- **主会话重启后不会自动接管原来的会话。** 新的主会话 id 不同，原会话的消息仍发往旧通道。用 `worker_send` 给它发一条消息即可接管。
 - **消息不能打断正在运行的命令。** 它在两次工具调用之间被读到。要立刻停下用 `worker_stop`。
 - **主会话处于 `bypassPermissions` 模式时会扣住 worker 的消息。** 需要在主节点的设置里加 `"crossSessionInbound": "accept"`。
 - **后台会话只能在已信任的目录里启动。** 所以 `workRoot` 要先信任一次，并且它自己不能在某个 git 仓库里面。
 - **`auto` 模式下被分类器直接拒绝的操作不能由主节点放行。** 分类器拒绝时不弹确认，所以不会走权限请求；插件用 `PermissionDenied` 钩子把被拒的操作和原因通知主节点，但拒绝已经生效。连续被拒 3 次或累计 20 次后，auto 模式会暂停并退回确认流程，这时的请求会交给主节点批准。想让所有需要确认的操作都经过主节点，用 `default` 模式。
 - **`ask_master` 不会原地等待。** 它发完问题就返回，worker 结束这一轮等 `[master]` 消息。需要原地等待答复时，worker 应该用 `AskUserQuestion`。
-- **worker 默认把结果推回主节点当前所在的分支。** 想让它推到别的分支，在任务说明里写明。
+- **worker 默认把结果推回主节点当前所在的分支。** 想让它推到别的分支，派发时用 `deliver_branch`。
 
 ## 开发
 

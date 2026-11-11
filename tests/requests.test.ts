@@ -211,3 +211,53 @@ test("with the master unreachable the hooks refuse at once", async () => {
   assert.equal(JSON.parse(question.stdout).hookSpecificOutput.permissionDecision, "deny");
   assert.deepEqual(listPending(env.CW_REQUESTS_DIR), []);
 });
+
+test("a session reports to the master its route names, and only that master may answer it", { timeout: 30_000 }, async () => {
+  const env = { CW_REQUESTS_DIR: path.join(tmp, "routed"), CW_ROUTES_DIR: path.join(tmp, "routes") };
+  const launchSocket = path.join(tmp, "launch.sock"); // the inbox it was started with: nobody listens there any more
+  const socketA = path.join(tmp, "a.sock");
+  const socketB = path.join(tmp, "b.sock");
+  const [inboxA, inboxB] = await Promise.all([fakeInbox(socketA), fakeInbox(socketB)]);
+  try {
+    // Master A dispatched it, in default mode with a chosen model.
+    const set = await runWorker(["route", "cw-9"], JSON.stringify({ socket: socketA, master: "aaaa", permissionMode: "default", model: "m1" }), env);
+    assert.equal(set.code, 0, set.stderr);
+
+    const hookArgs = [launchSocket, "box", "cw-9", "60", "master"];
+    const permission = runWorker(["hook-permission", ...hookArgs], JSON.stringify({ tool_name: "Bash", tool_input: { command: "ls" } }), env);
+    const id = /#([0-9a-f]+)/.exec(await inboxA.next())![1]!;
+
+    const listed = JSON.parse((await runWorker(["pending"], "", env)).stdout) as PendingRequest[];
+    assert.deepEqual(listed.map((r) => [r.id, r.master]), [[id, "aaaa"]]);
+
+    const allow = JSON.stringify({ kind: "permission", decision: "allow" });
+    const refused = await runWorker(["answer", id, "bbbb"], allow, env);
+    assert.equal(refused.code, 5);
+    assert.match(refused.stderr, /属于另一个主会话/);
+
+    // Master B messages the session and so takes it over; the launch settings stay.
+    await runWorker(["route", "cw-9"], JSON.stringify({ socket: socketB, master: "bbbb" }), env);
+    const shown = JSON.parse((await runWorker(["route-show", "cw-9"], "", env)).stdout);
+    assert.deepEqual(shown, { socket: socketB, master: "bbbb", permissionMode: "default", model: "m1" });
+    assert.equal((await runWorker(["answer", id, "bbbb"], allow, env)).code, 0);
+    assert.equal(JSON.parse((await permission).stdout).hookSpecificOutput.decision.behavior, "allow");
+
+    const denied = await runWorker(["hook-denied", ...hookArgs.slice(0, 3)], JSON.stringify({ tool_name: "Bash", tool_input: {} }), env);
+    assert.equal(denied.code, 0);
+    assert.match(await inboxB.next(), /被 auto 模式直接拒绝了/);
+
+    await runWorker(["unroute", "cw-9"], "", env);
+    assert.equal((await runWorker(["route-show", "cw-9"], "", env)).stdout.trim(), "null");
+    assert.equal((await runWorker(["route", "../x"], JSON.stringify({ socket: socketA, master: "aaaa" }), env)).code, 5);
+  } finally {
+    inboxA.close();
+    inboxB.close();
+  }
+});
+
+test("a fresh launch clears settings an earlier session of the same name left behind", async () => {
+  const env = { CW_ROUTES_DIR: path.join(tmp, "routes-fresh") };
+  await runWorker(["route", "cw-5"], JSON.stringify({ socket: "/s/a", master: "aaaa", permissionMode: "default", model: "m1" }), env);
+  await runWorker(["route", "cw-5"], JSON.stringify({ socket: "/s/b", master: "bbbb", permissionMode: "auto", model: null }), env);
+  assert.deepEqual(JSON.parse((await runWorker(["route-show", "cw-5"], "", env)).stdout), { socket: "/s/b", master: "bbbb", permissionMode: "auto" });
+});

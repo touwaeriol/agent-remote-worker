@@ -10,6 +10,7 @@ import {
   requestMessage,
   taskBrief,
   type CodeBase,
+  type PendingRequest,
   type PermissionMode,
   type RequestAnswer,
 } from "../shared/protocol.ts";
@@ -18,7 +19,7 @@ import type { PrepResult } from "../worker/cli.ts";
 import { Channels } from "./channels.ts";
 import { loadConfig, pickWorker, type Config } from "./config.ts";
 import { run } from "./exec.ts";
-import { inspectProject, syncProblems, type Project } from "./project.ts";
+import { checkBranchName, inspectProject, resolveStart, syncProblems, type Project } from "./project.ts";
 import { USAGE_ARGS, parseUsage, remainingPercent, type Usage } from "./usage.ts";
 import { WorkerNode, describeSession, hasExited, type RemoteSession } from "./worker-node.ts";
 
@@ -30,6 +31,10 @@ export interface DispatchArgs {
   /** Run in this existing folder on the worker instead, with no code preparation. */
   cwd?: string;
   allow_unsynced?: boolean;
+  /** Start from this branch, tag or commit on origin instead of this machine's current commit. */
+  base_ref?: string;
+  /** Push finished work to this branch instead of the default. */
+  deliver_branch?: string;
   name?: string;
   model?: string;
   permission_mode?: PermissionMode;
@@ -48,6 +53,15 @@ interface Preparation {
   startedAt: number;
   /** The latest progress line git printed. */
   progress?: string;
+}
+
+/** The code a dispatch hands over: the project, where the session starts and where it delivers. */
+interface Handover {
+  project: Project;
+  commit: string;
+  /** What the start was named, for the brief and the notices. */
+  start: string;
+  deliver: string;
 }
 
 const indent = (lines: string[]) => lines.map((line) => `  ${line}`).join("\n");
@@ -82,7 +96,7 @@ export class Master {
 
   private async askToReport(node: WorkerNode): Promise<void> {
     // Requests raised while the channel was down never reached this session; a restarted one forgot them.
-    const pending = await node.pendingRequests().catch(() => []);
+    const pending = (await node.pendingRequests().catch(() => [])).filter((request) => this.owns(request));
     if (pending.length) {
       await this.notify(
         `${WORKER_PREFIX} 和 worker「${node.name}」的通道刚刚恢复，下面 ${pending.length} 个请求仍在等待答复：\n\n` +
@@ -98,6 +112,17 @@ export class Master {
     }
   }
 
+  /** Whether a request is this master session's to answer (or nobody's in particular). */
+  private owns(request: PendingRequest): boolean {
+    return !request.master || request.master === this.channels.masterId;
+  }
+
+  /** Points a worker session at this master session, keeping or setting how it was launched. */
+  private bind(node: WorkerNode, sessionName: string, channel: PrepResult, launch?: { permissionMode: PermissionMode; model?: string }) {
+    const settings = launch ? { permissionMode: launch.permissionMode, model: launch.model ?? null } : {};
+    return node.setRoute(sessionName, { socket: channel.socket, master: this.channels.masterId, ...settings });
+  }
+
   // ---- dispatch, send, resume
 
   async dispatch(args: DispatchArgs): Promise<string> {
@@ -106,7 +131,7 @@ export class Master {
     if (!task) throw new ToolError("task 不能为空。");
 
     // Everything that can refuse the dispatch runs first, before anything is created on the worker.
-    const project = args.cwd ? undefined : await this.projectToHandOver(args);
+    const handover = args.cwd ? undefined : await this.projectToHandOver(args);
     const quotaNote = args.force ? "" : await this.checkQuota(node, config);
     const channel = await this.channels.ensure(node);
 
@@ -116,8 +141,9 @@ export class Master {
     const permissionMode = args.permission_mode ?? node.config.permissionMode;
     const follow = "worker 的汇报和提问会作为消息自动出现在本会话里，不需要轮询。追加指令用 worker_send。";
 
-    if (!project) {
+    if (!handover) {
       const cwd = args.cwd!.trim();
+      await this.bind(node, name, channel, { permissionMode, model: args.model });
       const id = await node.launch({ cwd, name, prompt: taskBrief(task), permissionMode, model: args.model, channel });
       this.remember(node, name);
       return [
@@ -141,13 +167,14 @@ export class Master {
     // Cloning can take minutes: do it in the background and tell the session when it is done.
     const job: Preparation = { worker: node.name, phase: "正在 worker 上克隆或更新项目", startedAt: Date.now() };
     this.preparing.set(name, job);
-    void this.prepareAndLaunch(node, job, { name, task, project, permissionMode, model: args.model, channel })
+    void this.prepareAndLaunch(node, job, { name, task, handover, permissionMode, model: args.model, channel })
       .then((text) => this.notify(text))
       .finally(() => this.preparing.delete(name));
     return [
       `已受理，正在 worker「${node.name}」上准备代码，准备好后自动启动会话。`,
       `名字：${name}`,
-      `代码：${project.url} 的 ${project.branch}@${project.commit.slice(0, 12)}`,
+      `代码：${handover.project.url}，起点 ${handover.start}@${handover.commit.slice(0, 12)}`,
+      `交付分支：${handover.deliver}`,
       `权限模式：${permissionMode}`,
       "不需要等待：会话启动（或准备失败）时本会话会收到一条通知。想看进度用 worker_status。" + quotaNote,
     ].join("\n");
@@ -160,17 +187,18 @@ export class Master {
     plan: {
       name: string;
       task: string;
-      project: Project;
+      handover: Handover;
       permissionMode: PermissionMode;
       model?: string;
       channel: PrepResult;
     },
   ): Promise<string> {
-    const { name, project } = plan;
+    const { name, handover } = plan;
+    const { project } = handover;
     let sessionDir: string | undefined;
     try {
       const workspace = await node.addWorkspace(
-        { url: project.url, commit: project.commit, session: name },
+        { url: project.url, commit: handover.commit, session: name },
         (line) => (job.progress = line),
       );
       sessionDir = workspace.path;
@@ -178,11 +206,13 @@ export class Master {
       job.progress = undefined;
       const code: CodeBase = {
         url: project.url,
-        branch: project.branch,
-        commit: project.commit,
+        start: handover.start,
+        commit: handover.commit,
+        deliver: handover.deliver,
         localBranch: workspace.localBranch,
         dir: workspace.codeDir,
       };
+      await this.bind(node, name, plan.channel, { permissionMode: plan.permissionMode, model: plan.model });
       const id = await node.launch({
         cwd: workspace.path,
         name,
@@ -194,8 +224,8 @@ export class Master {
       this.remember(node, name);
       return (
         `${WORKER_PREFIX} worker「${node.name}」会话「${name}」已启动（id ${id}）。` +
-        `代码已${workspace.cloned ? "克隆" : "更新"}到 ${workspace.codeDir}，起点 ${project.branch}@${project.commit.slice(0, 12)}。` +
-        `它完成后会推送到 ${project.branch}，届时在本机 git pull 后审查。`
+        `代码已${workspace.cloned ? "克隆" : "更新"}到 ${workspace.codeDir}，起点 ${handover.start}@${handover.commit.slice(0, 12)}。` +
+        `它完成后会推送到 ${handover.deliver}，届时在本机 git fetch origin ${handover.deliver} 后审查。`
       );
     } catch (error) {
       if (sessionDir) await node.removeWorkspace(sessionDir, true).catch(() => {});
@@ -219,8 +249,8 @@ export class Master {
       });
   }
 
-  /** The project a dispatch hands to the worker, refused when the worker could not see the same code. */
-  private async projectToHandOver(args: DispatchArgs): Promise<Project> {
+  /** The code a dispatch hands to the worker, refused when the worker could not see the same code. */
+  private async projectToHandOver(args: DispatchArgs): Promise<Handover> {
     const dir = args.project_dir?.trim() || process.cwd();
     const project = await inspectProject(dir);
     if (!project) {
@@ -229,15 +259,29 @@ export class Master {
           "要派发与代码无关的任务，请用 cwd 指定 worker 上一个已信任的目录；要派发别的项目，请用 project_dir 指定它在本机的路径。",
       );
     }
+    const deliverArg = args.deliver_branch?.trim() ? await checkBranchName(project.dir, args.deliver_branch) : undefined;
+
+    // A named start comes from origin, so what is (not) pushed from here does not matter.
+    if (args.base_ref?.trim()) {
+      const start = await resolveStart(project, args.base_ref);
+      return {
+        project,
+        commit: start.commit,
+        start: start.branch ?? args.base_ref.trim(),
+        deliver: deliverArg ?? start.branch ?? project.branch,
+      };
+    }
+
     const problems = syncProblems(project);
     if (problems.length && !args.allow_unsynced) {
       throw new ToolError(
         `没有派发：${project.dir} ${problems.join("，")}，worker 从远端拿不到这些内容。\n` +
           "请先提交并推送再重试。如果任务不需要未提交的改动，可以加 allow_unsynced=true：" +
-          `worker 会从本机当前提交 ${project.commit.slice(0, 12)} 开始，这个提交必须已在远端。`,
+          `worker 会从本机当前提交 ${project.commit.slice(0, 12)} 开始，这个提交必须已在远端。` +
+          "也可以用 base_ref 指定从远端的某个分支、标签或提交开始。",
       );
     }
-    return project;
+    return { project, commit: project.commit, start: project.branch, deliver: deliverArg ?? project.branch };
   }
 
   /** Stops a session, deletes it and cleans up its worktree. */
@@ -289,7 +333,9 @@ export class Master {
     const session = await node.findSession(args.session);
     if (hasExited(session)) return this.relaunch(node, session, message);
 
-    await this.channels.ensure(node);
+    const channel = await this.channels.ensure(node);
+    // Whoever messages a session hears from it from now on.
+    if (session.name) await this.bind(node, session.name, channel);
     await node.post(session, masterMessage(message));
     const when =
       session.status === "busy"
@@ -320,17 +366,24 @@ export class Master {
     if (!session.sessionId) throw new ToolError(`会话 ${session.id} 没有可续跑的对话记录。`);
     const channel = await this.channels.ensure(node);
     const name = session.name ?? randomName();
+    // Resume the way it was launched unless told otherwise: a resume must not quietly widen its permissions.
+    const launched = session.name ? await node.getRoute(session.name) : undefined;
+    const mode = permissionMode ?? launched?.permissionMode ?? node.config.permissionMode;
+    const model = launched?.model;
+    await this.bind(node, name, channel, { permissionMode: mode, model });
     const id = await node.launch({
       cwd: session.cwd ?? "~",
       name,
       prompt: masterMessage(message || "主节点让你从上次停下的地方继续。"),
-      permissionMode: permissionMode ?? node.config.permissionMode,
+      permissionMode: mode,
+      model,
       resumeSessionId: session.sessionId,
       channel,
     });
     this.remember(node, name);
     const changed = id === session.id ? "" : `\n注意：续跑后的会话 id 变成了 ${id}。`;
-    return `会话 ${session.id} 的进程已退出，已在后台续跑${message ? "并带上了你的消息" : ""}。当前 id：${id}${changed}`;
+    const how = `权限模式 ${mode}${model ? `，模型 ${model}` : ""}`;
+    return `会话 ${session.id} 的进程已退出，已在后台续跑${message ? "并带上了你的消息" : ""}（${how}）。当前 id：${id}${changed}`;
   }
 
   // ---- permission prompts and questions
@@ -341,7 +394,13 @@ export class Master {
     const blocks = await Promise.all(
       names.map(async (name) => {
         try {
-          return (await this.resolve(name).node.pendingRequests()).map(requestMessage);
+          const all = await this.resolve(name).node.pendingRequests();
+          const mine = all.filter((request) => this.owns(request));
+          const others = all.length - mine.length;
+          return [
+            ...mine.map(requestMessage),
+            ...(others ? [`worker「${name}」上另有 ${others} 个请求属于其他主会话派发的会话，由它们处理，这里不列出。`] : []),
+          ];
         } catch (error) {
           return [`worker「${name}」：无法查询（${errorText(error, 200)}）`];
         }
@@ -377,7 +436,7 @@ export class Master {
     } else {
       throw new ToolError("请给出答复：权限请求用 decision=\"allow\" 或 \"deny\"，提问用 answers。");
     }
-    const request = await node.answerRequest(id, answer);
+    const request = await node.answerRequest(id, answer, this.channels.masterId);
     const target = `worker「${node.name}」会话「${request.session}」`;
     if (answer.kind === "question") return `已把答案交给${target}，它会接着工作。`;
     if (answer.decision === "deny") return `已拒绝${target}的请求 #${id}，它会收到拒绝理由。`;
@@ -417,7 +476,8 @@ export class Master {
       Object.keys(config.workers).map(async (name) => {
         try {
           const { node } = this.resolve(name);
-          const [sessions, pending] = await Promise.all([node.sessions(), node.pendingRequests().catch(() => [])]);
+          const [sessions, all] = await Promise.all([node.sessions(), node.pendingRequests().catch(() => [])]);
+          const pending = all.filter((request) => this.owns(request));
           const waiting = pending.length ? `，${pending.length} 个请求等待答复（用 worker_pending 查看）` : "";
           const link = this.channels.isOpen(name) ? "通道已连接" : "通道未连接（派发或发消息时自动建立）";
           const lines = [...this.describePreparing(name), ...sessions.map(describeSession)];

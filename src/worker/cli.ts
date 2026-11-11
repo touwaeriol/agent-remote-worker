@@ -27,6 +27,7 @@ import {
   savePending,
   waitForAnswer,
 } from "./requests.ts";
+import { currentMaster, readRoute, removeRoute, routesDir, writeRoute } from "./routes.ts";
 import { TrustError, isTrusted, trustWorkRoot } from "./trust.ts";
 import { WorkspaceError, prepareWorkspace, removeWorkspace } from "./workspace.ts";
 
@@ -163,8 +164,9 @@ export function questionOutput(request: PendingRequest, answer: RequestAnswer | 
  * session until the master answers or the time runs out.
  */
 async function hookRequest(kind: "permission" | "question", args: string[]): Promise<number> {
-  const [socket = "", worker = "worker", session = "?", timeoutArg, approvalArg] = args;
+  const [launchSocket = "", worker = "worker", session = "?", timeoutArg, approvalArg] = args;
   const input = JSON.parse(await readStdin());
+  const { socket, master } = currentMaster(session, launchSocket);
   const timeoutMs = Math.max(0, Number(timeoutArg) || 0) * 1000; // 0: wait until answered
   const dir = requestsDir();
   const request: PendingRequest = {
@@ -179,6 +181,7 @@ async function hookRequest(kind: "permission" | "question", args: string[]): Pro
     toolName: String(input.tool_name ?? (kind === "question" ? "AskUserQuestion" : "?")),
     toolInput: (input.tool_input ?? {}) as Record<string, unknown>,
     ...(Array.isArray(input.permission_suggestions) ? { suggestions: input.permission_suggestions } : {}),
+    ...(master ? { master } : {}),
   };
   const output = kind === "permission" ? permissionOutput : questionOutput;
   const cleanUp = () => removeRequest(dir, request.id);
@@ -207,11 +210,11 @@ async function hookRequest(kind: "permission" | "question", args: string[]): Pro
  * hook-denied <socket> <worker> <session>: a PermissionDenied hook. Auto mode
  * refused a call without asking anyone; tell the master. The refusal stands.
  */
-async function hookDenied([socket = "", worker = "worker", session = "?"]: string[]): Promise<number> {
+async function hookDenied([launchSocket = "", worker = "worker", session = "?"]: string[]): Promise<number> {
   try {
     const input = JSON.parse(await readStdin());
     await postToInbox(
-      socket,
+      currentMaster(session, launchSocket).socket,
       autoDeniedMessage(worker, session, String(input.tool_name ?? "?"), (input.tool_input ?? {}) as Record<string, unknown>, String(input.reason ?? "")),
     );
   } catch {
@@ -220,22 +223,66 @@ async function hookDenied([socket = "", worker = "worker", session = "?"]: strin
   return 0;
 }
 
-/** pending: the requests on this machine still waiting for the master, as JSON. */
+/**
+ * pending: the requests on this machine still waiting for an answer, as JSON,
+ * each with the master its session reports to now.
+ */
 function pending(): number {
-  console.log(JSON.stringify(listPending(requestsDir())));
+  const dir = routesDir();
+  const requests = listPending(requestsDir()).map((request) => {
+    const { master: _recorded, ...rest } = request;
+    const master = readRoute(dir, request.session)?.master;
+    return master ? { ...rest, master } : rest;
+  });
+  console.log(JSON.stringify(requests));
   return 0;
 }
 
-/** answer <id>: hand the master's answer (JSON on stdin) to the hook waiting on that request. */
-async function answer(id: string | undefined): Promise<number> {
+/**
+ * answer <id> [master-id]: hand the master's answer (JSON on stdin) to the hook
+ * waiting on that request. With a master id, only a request of a session that
+ * reports to that master is answered.
+ */
+async function answer(id: string | undefined, masterId: string | undefined): Promise<number> {
   try {
-    const request = answerRequest(requestsDir(), id ?? "", JSON.parse(await readStdin()) as RequestAnswer);
+    const request = answerRequest(requestsDir(), id ?? "", JSON.parse(await readStdin()) as RequestAnswer, (found) => {
+      const owner = readRoute(routesDir(), found.session)?.master;
+      if (masterId && owner && owner !== masterId) {
+        throw new RequestError(
+          `请求 #${found.id} 属于另一个主会话派发的会话「${found.session}」，没有答复。` +
+            `那个主会话会收到并处理它。确实要由你接管这个会话，先用 worker_send 给它发一条消息（之后它的汇报和请求都会交给你），再答复。`,
+        );
+      }
+    });
     console.log(JSON.stringify(request));
     return 0;
   } catch (error) {
     console.error(error instanceof RequestError ? error.message : String(error));
     return 5;
   }
+}
+
+/** route <session>: merge the route (JSON on stdin) into the session's route and print it. */
+async function route(session: string | undefined): Promise<number> {
+  try {
+    console.log(JSON.stringify(writeRoute(routesDir(), session ?? "", JSON.parse(await readStdin()) as Parameters<typeof writeRoute>[2])));
+    return 0;
+  } catch (error) {
+    console.error(String(error));
+    return 5;
+  }
+}
+
+/** route-show <session>: the session's route as JSON, or null. */
+function routeShow(session: string | undefined): number {
+  console.log(JSON.stringify(readRoute(routesDir(), session ?? "") ?? null));
+  return 0;
+}
+
+/** unroute <session>: forget the session's route. */
+function unroute(session: string | undefined): number {
+  removeRoute(routesDir(), session ?? "");
+  return 0;
 }
 
 export async function runCli(command: string | undefined, args: string[]): Promise<number> {
@@ -253,7 +300,13 @@ export async function runCli(command: string | undefined, args: string[]): Promi
     case "pending":
       return pending();
     case "answer":
-      return answer(args[0]);
+      return answer(args[0], args[1]);
+    case "route":
+      return route(args[0]);
+    case "route-show":
+      return routeShow(args[0]);
+    case "unroute":
+      return unroute(args[0]);
     case "post":
       return post(args[0]);
     case "prep":
@@ -263,7 +316,7 @@ export async function runCli(command: string | undefined, args: string[]): Promi
     case "trust-root":
       return trustRoot(args[0]);
     default:
-      console.error("usage: worker.js serve | post <pid> | prep <master-id> | trust <dir> | pending | answer <id>");
+      console.error("usage: worker.js serve | post <pid> | prep <master-id> | trust <dir> | pending | answer <id> [master-id] | route <session> | route-show <session> | unroute <session>");
       return 2;
   }
 }
