@@ -49,7 +49,7 @@ server.registerTool(
         .optional()
         .describe("worker 完成后推送到的分支，可以是远端还没有的新分支；省略时用 base_ref 指定的分支，再没有就用本机当前分支"),
       name: z.string().optional().describe("会话名字"),
-      model: z.string().optional().describe("模型"),
+      model: z.string().optional().describe("模型；省略时用节点配置的 model，再没有就用 worker 的默认模型"),
       permission_mode: permissionMode,
       force: z.boolean().optional().describe("跳过额度门槛检查"),
     },

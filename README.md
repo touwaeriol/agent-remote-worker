@@ -65,6 +65,7 @@ Claude Code 插件 `agent-remote-worker`。
    | `trustWorkRoot` | 设为 `true` 时，插件发现 `workRoot` 未被信任就自动信任它；默认 `false`，这时需要你在 worker 上进入该目录运行一次 `claude` 并接受信任提示 |
    | `nodePath` | worker 上 `node` 的路径。默认在 `claude` 所在目录和 `PATH` 里找 |
    | `permissionMode` | 该节点的默认权限模式：`auto`、`default`、`bypassPermissions`、`dontAsk`、`acceptEdits` |
+| `model` | 该节点会话默认用的模型，写法和 `claude --model` 一样。`worker_dispatch` 的 `model` 参数优先；都不给时用 worker 上 Claude Code 自己的默认模型 |
    | `approval` | worker 的权限请求和提问由谁答复：`master`（默认，主节点可自行决定，也可以问你）或 `user`（每个请求都必须先问你） |
    | `approvalTimeout` | worker 等待答复的秒数。默认 0，表示不限时，一直等到答复；设为正数时，超时后权限请求按拒绝处理 |
    | `minRemainingPercent` | worker 本周额度剩余低于这个百分比时拒绝派发，默认 10 |

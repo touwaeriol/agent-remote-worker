@@ -21837,6 +21837,8 @@ var workerSchema = external_exports.object({
   /** `node` on the worker, when it is not next to `claude` or on PATH. */
   nodePath: external_exports.string().min(1).default("node"),
   permissionMode: external_exports.enum(PERMISSION_MODES).default("auto"),
+  /** The model worker sessions run on unless a dispatch names one; omitted, the worker's own default. */
+  model: external_exports.string().min(1).optional(),
   /**
    * Where projects are cloned on the worker. Trust this folder in Claude Code
    * once; the worktrees created inside it are then trusted too.
@@ -22471,11 +22473,12 @@ var Master = class {
     const taken = [...(await node.sessions()).map((session2) => session2.name), ...this.preparing.keys()];
     if (taken.includes(name)) name += `-${randomBytes(2).toString("hex")}`;
     const permissionMode2 = args.permission_mode ?? node.config.permissionMode;
+    const model = args.model?.trim() || node.config.model;
     const follow = "worker \u7684\u6C47\u62A5\u548C\u63D0\u95EE\u4F1A\u4F5C\u4E3A\u6D88\u606F\u81EA\u52A8\u51FA\u73B0\u5728\u672C\u4F1A\u8BDD\u91CC\uFF0C\u4E0D\u9700\u8981\u8F6E\u8BE2\u3002\u8FFD\u52A0\u6307\u4EE4\u7528 worker_send\u3002";
     if (!handover) {
       const cwd = args.cwd.trim();
-      await this.bind(node, name, channel, { permissionMode: permissionMode2, model: args.model });
-      const id = await node.launch({ cwd, name, prompt: taskBrief(task), permissionMode: permissionMode2, model: args.model, channel });
+      await this.bind(node, name, channel, { permissionMode: permissionMode2, model });
+      const id = await node.launch({ cwd, name, prompt: taskBrief(task), permissionMode: permissionMode2, model, channel });
       this.remember(node, name);
       return [
         `\u5DF2\u6D3E\u53D1\u5230 worker\u300C${node.name}\u300D\u3002`,
@@ -22483,6 +22486,7 @@ var Master = class {
         `\u540D\u5B57\uFF1A${name}`,
         `\u76EE\u5F55\uFF1A${cwd}\uFF08\u672A\u51C6\u5907\u4EE3\u7801\uFF09`,
         `\u6743\u9650\u6A21\u5F0F\uFF1A${permissionMode2}`,
+        `\u6A21\u578B\uFF1A${model ?? "worker \u7684\u9ED8\u8BA4\u6A21\u578B"}`,
         follow + quotaNote
       ].join("\n");
     }
@@ -22494,13 +22498,14 @@ var Master = class {
     }
     const job = { worker: node.name, phase: "\u6B63\u5728 worker \u4E0A\u514B\u9686\u6216\u66F4\u65B0\u9879\u76EE", startedAt: Date.now() };
     this.preparing.set(name, job);
-    void this.prepareAndLaunch(node, job, { name, task, handover, permissionMode: permissionMode2, model: args.model, channel }).then((text) => this.notify(text)).finally(() => this.preparing.delete(name));
+    void this.prepareAndLaunch(node, job, { name, task, handover, permissionMode: permissionMode2, model, channel }).then((text) => this.notify(text)).finally(() => this.preparing.delete(name));
     return [
       `\u5DF2\u53D7\u7406\uFF0C\u6B63\u5728 worker\u300C${node.name}\u300D\u4E0A\u51C6\u5907\u4EE3\u7801\uFF0C\u51C6\u5907\u597D\u540E\u81EA\u52A8\u542F\u52A8\u4F1A\u8BDD\u3002`,
       `\u540D\u5B57\uFF1A${name}`,
       `\u4EE3\u7801\uFF1A${handover.project.url}\uFF0C\u8D77\u70B9 ${handover.start}@${handover.commit.slice(0, 12)}`,
       `\u4EA4\u4ED8\u5206\u652F\uFF1A${handover.deliver}`,
       `\u6743\u9650\u6A21\u5F0F\uFF1A${permissionMode2}`,
+      `\u6A21\u578B\uFF1A${model ?? "worker \u7684\u9ED8\u8BA4\u6A21\u578B"}`,
       "\u4E0D\u9700\u8981\u7B49\u5F85\uFF1A\u4F1A\u8BDD\u542F\u52A8\uFF08\u6216\u51C6\u5907\u5931\u8D25\uFF09\u65F6\u672C\u4F1A\u8BDD\u4F1A\u6536\u5230\u4E00\u6761\u901A\u77E5\u3002\u60F3\u770B\u8FDB\u5EA6\u7528 worker_status\u3002" + quotaNote
     ].join("\n");
   }
@@ -22651,7 +22656,7 @@ ${usage.lines.join("\n")}
     const name = session2.name ?? randomName();
     const launched = session2.name ? await node.getRoute(session2.name) : void 0;
     const mode = permissionMode2 ?? launched?.permissionMode ?? node.config.permissionMode;
-    const model = launched?.model;
+    const model = launched?.model ?? node.config.model;
     await this.bind(node, name, channel, { permissionMode: mode, model });
     const id = await node.launch({
       cwd: session2.cwd ?? "~",
@@ -22823,6 +22828,7 @@ ${indent(usage.lines)}${low}`;
       }
     }
     rows.push(`\u6743\u9650\u6A21\u5F0F\u9ED8\u8BA4\u503C\uFF1A${node.config.permissionMode}`);
+    rows.push(`\u6A21\u578B\u9ED8\u8BA4\u503C\uFF1A${node.config.model ?? "worker \u81EA\u5DF1\u7684\u9ED8\u8BA4\u6A21\u578B"}`);
     rows.push(
       `\u6743\u9650\u8BF7\u6C42\u548C\u63D0\u95EE\uFF1A${node.config.approval === "user" ? "\u5FC5\u987B\u95EE\u7528\u6237" : "\u4E3B\u8282\u70B9\u53EF\u81EA\u884C\u51B3\u5B9A"}\uFF0C${node.config.approvalTimeout ? `\u7B49\u5F85\u4E0A\u9650 ${node.config.approvalTimeout} \u79D2` : "\u4E00\u76F4\u7B49\u5230\u7B54\u590D"}`
     );
@@ -22851,7 +22857,7 @@ server.registerTool(
       base_ref: external_exports.string().optional().describe("\u4ECE origin \u4E0A\u7684\u8FD9\u4E2A\u5206\u652F\u3001\u6807\u7B7E\u6216\u63D0\u4EA4\u5F00\u59CB\uFF0C\u800C\u4E0D\u662F\u672C\u673A\u5F53\u524D\u63D0\u4EA4\uFF1B\u7ED9\u4E86\u5B83\u5C31\u4E0D\u68C0\u67E5\u672C\u673A\u662F\u5426\u5DF2\u63A8\u9001\u3002\u4F8B\u5982\u53E6\u4E00\u4E2A worker \u63A8\u9001\u7684\u5206\u652F"),
       deliver_branch: external_exports.string().optional().describe("worker \u5B8C\u6210\u540E\u63A8\u9001\u5230\u7684\u5206\u652F\uFF0C\u53EF\u4EE5\u662F\u8FDC\u7AEF\u8FD8\u6CA1\u6709\u7684\u65B0\u5206\u652F\uFF1B\u7701\u7565\u65F6\u7528 base_ref \u6307\u5B9A\u7684\u5206\u652F\uFF0C\u518D\u6CA1\u6709\u5C31\u7528\u672C\u673A\u5F53\u524D\u5206\u652F"),
       name: external_exports.string().optional().describe("\u4F1A\u8BDD\u540D\u5B57"),
-      model: external_exports.string().optional().describe("\u6A21\u578B"),
+      model: external_exports.string().optional().describe("\u6A21\u578B\uFF1B\u7701\u7565\u65F6\u7528\u8282\u70B9\u914D\u7F6E\u7684 model\uFF0C\u518D\u6CA1\u6709\u5C31\u7528 worker \u7684\u9ED8\u8BA4\u6A21\u578B"),
       permission_mode: permissionMode,
       force: external_exports.boolean().optional().describe("\u8DF3\u8FC7\u989D\u5EA6\u95E8\u69DB\u68C0\u67E5")
     }
