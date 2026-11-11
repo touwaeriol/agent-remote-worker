@@ -17,6 +17,8 @@ const workerSchema = z.object({
   /** `node` on the worker, when it is not next to `claude` or on PATH. */
   nodePath: z.string().min(1).default("node"),
   permissionMode: z.enum(PERMISSION_MODES).default("auto"),
+  /** The model worker sessions run on unless a dispatch names one; omitted, the worker's own default. */
+  model: z.string().min(1).optional(),
   /**
    * Where projects are cloned on the worker. Trust this folder in Claude Code
    * once; the worktrees created inside it are then trusted too.

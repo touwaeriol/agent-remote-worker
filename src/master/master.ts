@@ -139,12 +139,13 @@ export class Master {
     const taken = [...(await node.sessions()).map((session) => session.name), ...this.preparing.keys()];
     if (taken.includes(name)) name += `-${randomBytes(2).toString("hex")}`;
     const permissionMode = args.permission_mode ?? node.config.permissionMode;
+    const model = args.model?.trim() || node.config.model;
     const follow = "worker 的汇报和提问会作为消息自动出现在本会话里，不需要轮询。追加指令用 worker_send。";
 
     if (!handover) {
       const cwd = args.cwd!.trim();
-      await this.bind(node, name, channel, { permissionMode, model: args.model });
-      const id = await node.launch({ cwd, name, prompt: taskBrief(task), permissionMode, model: args.model, channel });
+      await this.bind(node, name, channel, { permissionMode, model });
+      const id = await node.launch({ cwd, name, prompt: taskBrief(task), permissionMode, model, channel });
       this.remember(node, name);
       return [
         `已派发到 worker「${node.name}」。`,
@@ -152,6 +153,7 @@ export class Master {
         `名字：${name}`,
         `目录：${cwd}（未准备代码）`,
         `权限模式：${permissionMode}`,
+        `模型：${model ?? "worker 的默认模型"}`,
         follow + quotaNote,
       ].join("\n");
     }
@@ -167,7 +169,7 @@ export class Master {
     // Cloning can take minutes: do it in the background and tell the session when it is done.
     const job: Preparation = { worker: node.name, phase: "正在 worker 上克隆或更新项目", startedAt: Date.now() };
     this.preparing.set(name, job);
-    void this.prepareAndLaunch(node, job, { name, task, handover, permissionMode, model: args.model, channel })
+    void this.prepareAndLaunch(node, job, { name, task, handover, permissionMode, model, channel })
       .then((text) => this.notify(text))
       .finally(() => this.preparing.delete(name));
     return [
@@ -176,6 +178,7 @@ export class Master {
       `代码：${handover.project.url}，起点 ${handover.start}@${handover.commit.slice(0, 12)}`,
       `交付分支：${handover.deliver}`,
       `权限模式：${permissionMode}`,
+      `模型：${model ?? "worker 的默认模型"}`,
       "不需要等待：会话启动（或准备失败）时本会话会收到一条通知。想看进度用 worker_status。" + quotaNote,
     ].join("\n");
   }
@@ -369,7 +372,7 @@ export class Master {
     // Resume the way it was launched unless told otherwise: a resume must not quietly widen its permissions.
     const launched = session.name ? await node.getRoute(session.name) : undefined;
     const mode = permissionMode ?? launched?.permissionMode ?? node.config.permissionMode;
-    const model = launched?.model;
+    const model = launched?.model ?? node.config.model;
     await this.bind(node, name, channel, { permissionMode: mode, model });
     const id = await node.launch({
       cwd: session.cwd ?? "~",
@@ -565,6 +568,7 @@ export class Master {
       }
     }
     rows.push(`权限模式默认值：${node.config.permissionMode}`);
+    rows.push(`模型默认值：${node.config.model ?? "worker 自己的默认模型"}`);
     rows.push(
       `权限请求和提问：${node.config.approval === "user" ? "必须问用户" : "主节点可自行决定"}，${node.config.approvalTimeout ? `等待上限 ${node.config.approvalTimeout} 秒` : "一直等到答复"}`,
     );
