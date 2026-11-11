@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
-import { inspectProject, syncProblems } from "../src/master/project.ts";
+import { checkBranchName, inspectProject, resolveStart, syncProblems } from "../src/master/project.ts";
 import { taskBrief } from "../src/shared/protocol.ts";
 import { formatQuestions } from "../src/shared/protocol.ts";
 import { prepareWorkspace, projectName, removeWorkspace, workspacePaths } from "../src/worker/workspace.ts";
@@ -70,6 +70,21 @@ test("inspectProject reports what a worker could not see", async () => {
   assert.equal(await inspectProject(os.tmpdir()), undefined);
 });
 
+test("base_ref resolves to a commit on origin, and deliver_branch must be a branch name", async () => {
+  const project = (await inspectProject(master))!;
+  const main = git(master, "rev-parse", "HEAD");
+  assert.deepEqual(await resolveStart(project, "main"), { commit: main, branch: "main" });
+  assert.deepEqual(await resolveStart(project, "origin/main"), { commit: main, branch: "main" });
+  git(master, "tag", "v1");
+  git(master, "push", "--quiet", "origin", "v1");
+  assert.deepEqual(await resolveStart(project, "v1"), { commit: main });
+  assert.deepEqual(await resolveStart(project, main.slice(0, 10)), { commit: main });
+  await assert.rejects(resolveStart(project, "no-such-branch"), /既不是分支也不是标签/);
+
+  assert.equal(await checkBranchName(master, "origin/feature/x"), "feature/x");
+  await assert.rejects(checkBranchName(master, "bad..name"), /不是合法的分支名/);
+});
+
 test("a session gets its own worktree at the master's commit, and cleanup protects unpushed work", () => {
   const commit = git(master, "rev-parse", "HEAD");
   const first = prepareWorkspace({ root, url: remote, commit, session: "cw-1" });
@@ -108,10 +123,15 @@ test("a session gets its own worktree at the master's commit, and cleanup protec
 });
 
 test("the brief states the sync rules only when code was prepared", () => {
-  const withCode = taskBrief("fix it", { url: "git@h:t/app.git", branch: "dev", commit: "abcdef1234567890", localBranch: "rw/cw-1", dir: "/w/sessions/app/cw-1/app" });
+  const withCode = taskBrief("fix it", { url: "git@h:t/app.git", start: "dev", commit: "abcdef1234567890", deliver: "dev", localBranch: "rw/cw-1", dir: "/w/sessions/app/cw-1/app" });
   assert.match(withCode, /git push origin HEAD:dev/);
+  assert.match(withCode, /ls-remote --exit-code --heads origin dev/);
+  const elsewhere = taskBrief("fix it", { url: "git@h:t/app.git", start: "main", commit: "abcdef1234567890", deliver: "feature/x", localBranch: "rw/cw-1", dir: "/w/app" });
+  assert.match(elsewhere, /交付分支：feature\/x/);
+  assert.match(elsewhere, /git push origin HEAD:feature\/x/);
+  assert.match(elsewhere, /起点是 main 的提交/);
   assert.match(withCode, /密钥已经配置好/);
-  assert.match(withCode, /abcdef123456（/);
+  assert.match(withCode, /abcdef123456。/);
   assert.doesNotMatch(taskBrief("look around"), /git push/);
   assert.doesNotMatch(withCode, /独立分支上提交/);
 });

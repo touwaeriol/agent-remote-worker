@@ -5,6 +5,7 @@ import { z } from "zod";
 import { postToInbox } from "../shared/inbox.ts";
 import { VERSION, WORKER_SERVER, workerMessage, type ReportKind } from "../shared/protocol.ts";
 import { ToolError, errorText, textTool } from "../shared/tooling.ts";
+import { currentMaster } from "./routes.ts";
 
 export async function serveWorker(): Promise<void> {
   const masterSocket = process.env.CW_MASTER_SOCK ?? "";
@@ -14,7 +15,8 @@ export async function serveWorker(): Promise<void> {
   const deliver = async (kind: ReportKind, body: string) => {
     if (!body.trim()) throw new ToolError("消息内容为空。");
     try {
-      await postToInbox(masterSocket, workerMessage(worker, session, kind, body));
+      // The master that last dispatched, messaged or resumed this session.
+      await postToInbox(currentMaster(session, masterSocket).socket, workerMessage(worker, session, kind, body));
     } catch (error) {
       throw new ToolError(
         `未送达：主节点当前不在线（${errorText(error, 80)}）。可以稍后重试，或先继续工作，主节点重连后会让你重新汇报。`,

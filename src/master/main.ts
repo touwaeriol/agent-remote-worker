@@ -10,7 +10,7 @@ const INSTRUCTIONS =
   "agent-remote-worker：把任务派给其他机器上的 Claude Code 会话（remote worker），它们用的是另一个账号的额度。" +
   "和内置 Sub Agent 不同：worker 在另一台机器、另一个账号、独立的代码副本上运行，看不到本会话的上下文和文件，" +
   "所以 worker_dispatch 的 task 必须自包含（目标、边界、验收标准）。代码通过 Git 远端同步：派发前本机代码要已提交并推送，" +
-  "worker 默认把结果推回本机当前所在的分支，由你 git pull 后审查。" +
+  "worker 默认从本机当前提交开始、把结果推回本机当前所在的分支；用 base_ref 指定从远端别的分支或提交开始，用 deliver_branch 指定推到哪个分支（例如一个单独的分支，审查后再合并）。" +
   "worker 的权限请求和提问会转给你，worker 在原地等待：用 worker_answer 按编号答复。任务范围内你能定的直接答复，需求取舍、有风险或不可逆的操作、超出原任务范围的事先问用户。" +
   "用户要求派给 worker 时才派发。派发后不需要轮询：worker 的汇报和提问会作为以 [agent-remote-worker] 开头的消息自动出现，用 worker_send 回复。" +
   "派发前会自动检查 worker 的额度。详细做法见 agent-remote-worker:dispatch skill。";
@@ -40,6 +40,14 @@ server.registerTool(
         .optional()
         .describe("改为在 worker 上这个现成的已信任目录里运行，不准备代码；只用于与本机项目无关的任务"),
       allow_unsynced: z.boolean().optional().describe("本机有未推送或未提交的改动时仍然派发"),
+      base_ref: z
+        .string()
+        .optional()
+        .describe("从 origin 上的这个分支、标签或提交开始，而不是本机当前提交；给了它就不检查本机是否已推送。例如另一个 worker 推送的分支"),
+      deliver_branch: z
+        .string()
+        .optional()
+        .describe("worker 完成后推送到的分支，可以是远端还没有的新分支；省略时用 base_ref 指定的分支，再没有就用本机当前分支"),
       name: z.string().optional().describe("会话名字"),
       model: z.string().optional().describe("模型"),
       permission_mode: permissionMode,
@@ -53,7 +61,8 @@ server.registerTool(
   "worker_send",
   {
     description:
-      "给 worker 会话发一条消息（追加要求、回答它的提问、询问进度）。忙时它会在当前工具调用结束后读到，空闲时被唤醒，进程已退出时自动续跑。",
+      "给 worker 会话发一条消息（追加要求、回答它的提问、询问进度）。忙时它会在当前工具调用结束后读到，空闲时被唤醒，进程已退出时自动续跑（沿用派发时的权限模式和模型）。" +
+      "发消息后，这个会话的汇报和请求都交给本会话，即使它原来是别的主会话派发的。",
     inputSchema: { worker, session, message: z.string() },
   },
   textTool((args) => master.send(args)),
@@ -81,7 +90,8 @@ server.registerTool(
 server.registerTool(
   "worker_pending",
   {
-    description: "列出 worker 会话正在等待答复的权限请求和提问。通道断过、或想确认有没有漏掉的请求时使用。",
+    description:
+      "列出本会话派发的 worker 会话正在等待答复的权限请求和提问。通道断过、或想确认有没有漏掉的请求时使用。其他主会话派发的会话的请求只给出数量。",
     inputSchema: { worker },
   },
   textTool((args) => master.pending(args)),
@@ -118,8 +128,14 @@ server.registerTool(
 server.registerTool(
   "worker_resume",
   {
-    description: "把已停止或进程已退出的 worker 会话在后台重新拉起，保留原有上下文，可附一条新指令。",
-    inputSchema: { worker, session, message: z.string().optional(), permission_mode: permissionMode },
+    description:
+      "把已停止或进程已退出的 worker 会话在后台重新拉起，保留原有上下文，可附一条新指令。默认沿用派发时的权限模式和模型。",
+    inputSchema: {
+      worker,
+      session,
+      message: z.string().optional(),
+      permission_mode: permissionMode.describe("换一个权限模式续跑，之后的自动续跑也沿用它；省略时沿用上次的"),
+    },
   },
   textTool((args) => master.resume(args)),
 );

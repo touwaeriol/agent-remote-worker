@@ -52,3 +52,44 @@ export function syncProblems(project: Project): string[] {
     project.uncommitted ? `有 ${project.uncommitted} 个文件的改动还没有提交` : "",
   ].filter(Boolean);
 }
+
+/** Where a session starts: a commit, and the remote branch it came from when there is one. */
+export interface StartPoint {
+  commit: string;
+  /** The branch on origin that `ref` named, if it named one. */
+  branch?: string;
+}
+
+/**
+ * Resolves `ref` to a commit a worker can fetch from origin: a branch or tag on
+ * origin (an `origin/` prefix is fine), or a commit id.
+ */
+export async function resolveStart(project: Project, ref: string): Promise<StartPoint> {
+  const name = ref.trim().replace(/^origin\//, "").replace(/^refs\/heads\//, "");
+  if (!name) throw new ToolError("base_ref 不能为空。");
+  const lsRemote = async (pattern: string) => {
+    const result = await run("git", ["-C", project.dir, "ls-remote", "origin", pattern], { timeoutMs: 60_000 });
+    if (result.code !== 0) throw new ToolError(`无法查询远端 origin：${result.stderr.trim().slice(-300)}`);
+    return result.stdout.trim().split("\n").filter(Boolean).map((line) => line.split(/\s+/));
+  };
+  const heads = await lsRemote(`refs/heads/${name}`);
+  if (heads[0]) return { commit: heads[0][0]!, branch: name };
+  const tags = await lsRemote(`refs/tags/${name}*`);
+  const tag = tags.find(([, refName]) => refName === `refs/tags/${name}^{}`) ?? tags.find(([, refName]) => refName === `refs/tags/${name}`);
+  if (tag) return { commit: tag[0]! };
+  if (/^[0-9a-f]{7,40}$/i.test(name)) {
+    const full = await git(project.dir, "rev-parse", "--verify", "--quiet", `${name}^{commit}`);
+    if (full) return { commit: full };
+    if (name.length === 40) return { commit: name.toLowerCase() };
+    throw new ToolError(`本机找不到提交 ${name}，无法确认完整的提交号。请给完整的 40 位提交号，或给远端分支名。`);
+  }
+  throw new ToolError(`base_ref「${ref}」在 origin 上既不是分支也不是标签，也不像提交号。`);
+}
+
+/** Refuses a name git would not take as a branch. */
+export async function checkBranchName(dir: string, name: string): Promise<string> {
+  const branch = name.trim().replace(/^origin\//, "").replace(/^refs\/heads\//, "");
+  const result = await run("git", ["-C", dir, "check-ref-format", "--branch", branch], { timeoutMs: 10_000 });
+  if (!branch || result.code !== 0) throw new ToolError(`deliver_branch「${name}」不是合法的分支名。`);
+  return branch;
+}

@@ -83,7 +83,13 @@ export function listPending(dir: string): PendingRequest[] {
 }
 
 /** Hands an answer to the hook waiting on `id`. */
-export function answerRequest(dir: string, id: string, answer: RequestAnswer): PendingRequest {
+export function answerRequest(
+  dir: string,
+  id: string,
+  answer: RequestAnswer,
+  /** Throws a RequestError when this caller may not answer the request. */
+  check?: (request: PendingRequest) => void,
+): PendingRequest {
   if (!ID.test(id)) throw new RequestError(`请求编号「${id}」格式不对。`);
   const request = readPending(dir, id);
   if (!request) throw new RequestError(`没有待答复的请求 #${id}：它可能已经超时、已被答复，或会话已经停止。`);
@@ -94,6 +100,7 @@ export function answerRequest(dir: string, id: string, answer: RequestAnswer): P
         : `#${id} 是提问，请用 answers 答复。`,
     );
   }
+  check?.(request);
   if (fs.existsSync(answerFile(dir, id))) throw new RequestError(`请求 #${id} 已经答复过了。`);
   writeAtomic(answerFile(dir, id), answer);
   return request;

@@ -3262,8 +3262,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path6) {
-      let input = path6;
+    function removeDotSegments(path7) {
+      let input = path7;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3337,11 +3337,11 @@ var require_utils = __commonJS({
       }
       return output.join("");
     }
-    function removeDotSegmentsRelative(path6) {
-      if (path6 === "" || path6[0] === "/") {
-        return removeDotSegments(path6);
+    function removeDotSegmentsRelative(path7) {
+      if (path7 === "" || path7[0] === "/") {
+        return removeDotSegments(path7);
       }
-      const segments = path6.split("/");
+      const segments = path7.split("/");
       const last = segments.length - 1;
       const output = [];
       let trailingDirectory = false;
@@ -3704,8 +3704,8 @@ var require_schemes = __commonJS({
       }
       if (wsComponent.resourceName) {
         const queryIndex = wsComponent.resourceName.indexOf("?");
-        const path6 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
-        wsComponent.path = path6 && path6 !== "/" ? path6 : void 0;
+        const path7 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
+        wsComponent.path = path7 && path7 !== "/" ? path7 : void 0;
         wsComponent.query = queryIndex === -1 ? void 0 : wsComponent.resourceName.slice(queryIndex + 1);
         wsComponent.resourceName = void 0;
       }
@@ -7242,12 +7242,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs6, exportName) {
+    function addFormats(ajv, list, fs7, exportName) {
       var _a;
       var _b;
       (_a = (_b = ajv.opts.code).formats) !== null && _a !== void 0 ? _a : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs6[f]);
+        ajv.addFormat(f, fs7[f]);
     }
     module.exports = exports = formatsPlugin;
     Object.defineProperty(exports, "__esModule", { value: true });
@@ -7256,9 +7256,9 @@ var require_dist = __commonJS({
 });
 
 // src/worker/cli.ts
-import fs5 from "node:fs";
-import os5 from "node:os";
-import path5 from "node:path";
+import fs6 from "node:fs";
+import os6 from "node:os";
+import path6 from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/shared/inbox.ts
@@ -7447,7 +7447,7 @@ function listPending(dir) {
   }
   return names.map((name) => /^([0-9a-f]+)\.json$/.exec(name)?.[1]).filter((id) => id !== void 0).map((id) => readPending(dir, id)).filter((request) => request !== void 0).sort((a, b) => a.createdAt - b.createdAt);
 }
-function answerRequest(dir, id, answer2) {
+function answerRequest(dir, id, answer2, check2) {
   if (!ID.test(id)) throw new RequestError(`\u8BF7\u6C42\u7F16\u53F7\u300C${id}\u300D\u683C\u5F0F\u4E0D\u5BF9\u3002`);
   const request = readPending(dir, id);
   if (!request) throw new RequestError(`\u6CA1\u6709\u5F85\u7B54\u590D\u7684\u8BF7\u6C42 #${id}\uFF1A\u5B83\u53EF\u80FD\u5DF2\u7ECF\u8D85\u65F6\u3001\u5DF2\u88AB\u7B54\u590D\uFF0C\u6216\u4F1A\u8BDD\u5DF2\u7ECF\u505C\u6B62\u3002`);
@@ -7456,6 +7456,7 @@ function answerRequest(dir, id, answer2) {
       request.kind === "permission" ? `#${id} \u662F\u6743\u9650\u8BF7\u6C42\uFF0C\u8BF7\u7528 decision="allow" \u6216 "deny" \u7B54\u590D\u3002` : `#${id} \u662F\u63D0\u95EE\uFF0C\u8BF7\u7528 answers \u7B54\u590D\u3002`
     );
   }
+  check2?.(request);
   if (fs2.existsSync(answerFile(dir, id))) throw new RequestError(`\u8BF7\u6C42 #${id} \u5DF2\u7ECF\u7B54\u590D\u8FC7\u4E86\u3002`);
   writeAtomic(answerFile(dir, id), answer2);
   return request;
@@ -7473,17 +7474,60 @@ async function waitForAnswer(dir, request, intervalMs = 500) {
   }
 }
 
-// src/worker/trust.ts
+// src/worker/routes.ts
 import fs3 from "node:fs";
 import os3 from "node:os";
 import path3 from "node:path";
+function routesDir() {
+  return process.env.CW_ROUTES_DIR ?? path3.join(os3.homedir(), ".agent-remote-worker", "routes");
+}
+var NAME = /^[0-9A-Za-z._-]{1,128}$/;
+function routeFile(dir, session) {
+  if (!NAME.test(session) || session.startsWith(".")) throw new Error(`bad session name: ${session}`);
+  return path3.join(dir, `${session}.json`);
+}
+function readRoute(dir, session) {
+  try {
+    const route2 = JSON.parse(fs3.readFileSync(routeFile(dir, session), "utf8"));
+    return typeof route2.socket === "string" && typeof route2.master === "string" ? route2 : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function writeRoute(dir, session, update) {
+  const merged = Object.fromEntries(
+    Object.entries({ ...readRoute(dir, session), ...update }).filter(([, value]) => value !== void 0 && value !== null)
+  );
+  if (!merged.socket || !merged.master) throw new Error("a route needs socket and master");
+  fs3.mkdirSync(dir, { recursive: true, mode: 448 });
+  const file = routeFile(dir, session);
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs3.writeFileSync(tmp, JSON.stringify(merged), { mode: 384 });
+  fs3.renameSync(tmp, file);
+  return merged;
+}
+function removeRoute(dir, session) {
+  try {
+    fs3.rmSync(routeFile(dir, session), { force: true });
+  } catch {
+  }
+}
+function currentMaster(session, launchSocket) {
+  const route2 = readRoute(routesDir(), session);
+  return route2 ? { socket: route2.socket, master: route2.master } : { socket: launchSocket };
+}
+
+// src/worker/trust.ts
+import fs4 from "node:fs";
+import os4 from "node:os";
+import path4 from "node:path";
 var TrustError = class extends Error {
 };
-var defaultConfigFile = () => path3.join(os3.homedir(), ".claude.json");
-var expandHome = (p) => p.replace(/^~(?=$|\/)/, os3.homedir());
+var defaultConfigFile = () => path4.join(os4.homedir(), ".claude.json");
+var expandHome = (p) => p.replace(/^~(?=$|\/)/, os4.homedir());
 function readConfig(configFile) {
   try {
-    return JSON.parse(fs3.readFileSync(configFile, "utf8"));
+    return JSON.parse(fs4.readFileSync(configFile, "utf8"));
   } catch (error2) {
     if (error2.code === "ENOENT") return {};
     throw new TrustError(`\u65E0\u6CD5\u8BFB\u53D6 ${configFile}\uFF1A${error2.message}`);
@@ -7491,29 +7535,29 @@ function readConfig(configFile) {
 }
 function isTrusted(dir, configFile = defaultConfigFile()) {
   const projects = readConfig(configFile).projects ?? {};
-  for (let current = path3.resolve(expandHome(dir)); ; current = path3.dirname(current)) {
+  for (let current = path4.resolve(expandHome(dir)); ; current = path4.dirname(current)) {
     if (projects[current]?.hasTrustDialogAccepted) return true;
-    if (path3.dirname(current) === current) return false;
+    if (path4.dirname(current) === current) return false;
   }
 }
 function enclosingCheckout(dir) {
-  for (let current = dir; ; current = path3.dirname(current)) {
-    if (fs3.existsSync(path3.join(current, ".git"))) return current;
-    if (path3.dirname(current) === current) return void 0;
+  for (let current = dir; ; current = path4.dirname(current)) {
+    if (fs4.existsSync(path4.join(current, ".git"))) return current;
+    if (path4.dirname(current) === current) return void 0;
   }
 }
 function trustWorkRoot(root, configFile = defaultConfigFile()) {
-  const requested = path3.resolve(expandHome(root));
-  fs3.mkdirSync(requested, { recursive: true });
-  const dir = fs3.realpathSync(requested);
-  if (dir === fs3.realpathSync(os3.homedir())) {
+  const requested = path4.resolve(expandHome(root));
+  fs4.mkdirSync(requested, { recursive: true });
+  const dir = fs4.realpathSync(requested);
+  if (dir === fs4.realpathSync(os4.homedir())) {
     throw new TrustError("workRoot \u4E0D\u80FD\u662F\u4E3B\u76EE\u5F55\uFF1AClaude Code \u4E0D\u4F1A\u957F\u671F\u4FE1\u4EFB\u4E3B\u76EE\u5F55\u3002");
   }
   const checkout = enclosingCheckout(dir);
   if (checkout) {
     throw new TrustError(`workRoot \u5728 git \u4ED3\u5E93 ${checkout} \u91CC\u9762\uFF1A\u4FE1\u4EFB\u4F1A\u8BB0\u5728\u6574\u4E2A\u4ED3\u5E93\u4E0A\uFF0C\u8BF7\u6362\u4E00\u4E2A\u4ED3\u5E93\u4E4B\u5916\u7684\u76EE\u5F55\u3002`);
   }
-  if (fs3.existsSync(path3.join(dir, ".claude")) || fs3.existsSync(path3.join(dir, ".mcp.json"))) {
+  if (fs4.existsSync(path4.join(dir, ".claude")) || fs4.existsSync(path4.join(dir, ".mcp.json"))) {
     throw new TrustError(`${dir} \u91CC\u5DF2\u6709 Claude Code \u7684\u914D\u7F6E\uFF08.claude \u6216 .mcp.json\uFF09\uFF0C\u9700\u8981\u4F60\u4EB2\u81EA\u786E\u8BA4\uFF1A\u8BF7\u5728\u8BE5\u76EE\u5F55\u8FD0\u884C\u4E00\u6B21 claude\u3002`);
   }
   if (isTrusted(dir, configFile)) return false;
@@ -7522,9 +7566,9 @@ function trustWorkRoot(root, configFile = defaultConfigFile()) {
     const projects = config2.projects ??= {};
     projects[dir] = { ...projects[dir], hasTrustDialogAccepted: true };
     const temporary = `${configFile}.agent-remote-worker.${process.pid}`;
-    const mode = fs3.existsSync(configFile) ? fs3.statSync(configFile).mode & 511 : 384;
-    fs3.writeFileSync(temporary, JSON.stringify(config2, null, 2), { mode });
-    fs3.renameSync(temporary, configFile);
+    const mode = fs4.existsSync(configFile) ? fs4.statSync(configFile).mode & 511 : 384;
+    fs4.writeFileSync(temporary, JSON.stringify(config2, null, 2), { mode });
+    fs4.renameSync(temporary, configFile);
     if (isTrusted(dir, configFile)) return true;
   }
   throw new TrustError(`\u5199\u5165 ${configFile} \u540E\u4FE1\u4EFB\u8BB0\u5F55\u4ECD\u7136\u4E0D\u5728\uFF0C\u53EF\u80FD\u6709\u4F1A\u8BDD\u5728\u540C\u65F6\u6539\u5199\u8FD9\u4E2A\u6587\u4EF6\u3002\u8BF7\u91CD\u8BD5\u3002`);
@@ -7533,14 +7577,14 @@ function trustWorkRoot(root, configFile = defaultConfigFile()) {
 // src/worker/workspace.ts
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import fs4 from "node:fs";
-import os4 from "node:os";
-import path4 from "node:path";
+import fs5 from "node:fs";
+import os5 from "node:os";
+import path5 from "node:path";
 var WorkspaceError = class extends Error {
 };
 var SESSIONS = "sessions";
 var CLONE_TIMEOUT_MS = 10 * 6e4;
-var expandHome2 = (p) => p.replace(/^~(?=$|\/)/, os4.homedir());
+var expandHome2 = (p) => p.replace(/^~(?=$|\/)/, os5.homedir());
 var safeName = (value) => value.replace(/[^0-9A-Za-z._-]/g, "-").replace(/^[.-]+/, "") || "x";
 function projectName(url) {
   const last = url.replace(/[/\\]+$/, "").split(/[/:\\]/).pop() ?? "";
@@ -7548,13 +7592,13 @@ function projectName(url) {
 }
 function workspacePaths(root, url, session) {
   const base = `${projectName(url)}-${createHash("sha256").update(url).digest("hex").slice(0, 8)}`;
-  const absoluteRoot = path4.resolve(expandHome2(root));
-  const sessionDir = path4.join(absoluteRoot, SESSIONS, base, safeName(session));
+  const absoluteRoot = path5.resolve(expandHome2(root));
+  const sessionDir = path5.join(absoluteRoot, SESSIONS, base, safeName(session));
   return {
     root: absoluteRoot,
-    repo: path4.join(absoluteRoot, "repos", base),
+    repo: path5.join(absoluteRoot, "repos", base),
     sessionDir,
-    worktree: path4.join(sessionDir, projectName(url)),
+    worktree: path5.join(sessionDir, projectName(url)),
     localBranch: `rw/${safeName(session)}`
   };
 }
@@ -7578,10 +7622,10 @@ function git(cwd, args2, timeoutMs = 12e4, showProgress = false) {
 }
 function prepareWorkspace(request) {
   const paths = workspacePaths(request.root, request.url, request.session);
-  fs4.mkdirSync(paths.root, { recursive: true });
-  const cloned = !fs4.existsSync(path4.join(paths.repo, ".git"));
+  fs5.mkdirSync(paths.root, { recursive: true });
+  const cloned = !fs5.existsSync(path5.join(paths.repo, ".git"));
   if (cloned) {
-    fs4.mkdirSync(path4.dirname(paths.repo), { recursive: true });
+    fs5.mkdirSync(path5.dirname(paths.repo), { recursive: true });
     git(void 0, ["clone", "--progress", request.url, paths.repo], CLONE_TIMEOUT_MS, true);
   } else {
     git(paths.repo, ["fetch", "--progress", "--prune", "origin"], CLONE_TIMEOUT_MS, true);
@@ -7591,23 +7635,23 @@ function prepareWorkspace(request) {
   } catch {
     throw new WorkspaceError(`\u63D0\u4EA4 ${request.commit.slice(0, 12)} \u4E0D\u5728\u8FDC\u7AEF\u4ED3\u5E93\u91CC\uFF0C\u4E3B\u8282\u70B9\u9700\u8981\u5148\u63A8\u9001\u3002`);
   }
-  if (fs4.existsSync(paths.sessionDir)) {
+  if (fs5.existsSync(paths.sessionDir)) {
     throw new WorkspaceError(`\u4F1A\u8BDD\u540D\u300C${request.session}\u300D\u5728\u8FD9\u4E2A\u9879\u76EE\u4E0A\u5DF2\u6709\u5DE5\u4F5C\u76EE\u5F55 ${paths.sessionDir}\uFF0C\u8BF7\u6362\u4E00\u4E2A\u540D\u5B57\u3002`);
   }
   git(paths.repo, ["worktree", "prune"]);
-  fs4.mkdirSync(paths.sessionDir, { recursive: true });
+  fs5.mkdirSync(paths.sessionDir, { recursive: true });
   git(paths.repo, ["worktree", "add", "--quiet", "-B", paths.localBranch, paths.worktree, request.commit]);
   return { path: paths.sessionDir, codeDir: paths.worktree, localBranch: paths.localBranch, cloned };
 }
 function removeWorkspace(request) {
-  const sessionDir = path4.resolve(request.path);
-  const managed = path4.join(path4.resolve(expandHome2(request.root)), SESSIONS) + path4.sep;
+  const sessionDir = path5.resolve(request.path);
+  const managed = path5.join(path5.resolve(expandHome2(request.root)), SESSIONS) + path5.sep;
   if (!sessionDir.startsWith(managed)) return { removed: false, reason: "\u4E0D\u662F\u672C\u63D2\u4EF6\u521B\u5EFA\u7684\u5DE5\u4F5C\u76EE\u5F55\uFF0C\u672A\u5220\u9664" };
-  if (!fs4.existsSync(sessionDir)) return { removed: false, reason: "\u5DE5\u4F5C\u76EE\u5F55\u5DF2\u4E0D\u5B58\u5728" };
-  const inside = fs4.readdirSync(sessionDir).map((entry) => path4.join(sessionDir, entry));
-  const worktree = inside.find((entry) => fs4.existsSync(path4.join(entry, ".git")));
+  if (!fs5.existsSync(sessionDir)) return { removed: false, reason: "\u5DE5\u4F5C\u76EE\u5F55\u5DF2\u4E0D\u5B58\u5728" };
+  const inside = fs5.readdirSync(sessionDir).map((entry) => path5.join(sessionDir, entry));
+  const worktree = inside.find((entry) => fs5.existsSync(path5.join(entry, ".git")));
   if (!worktree) {
-    fs4.rmSync(sessionDir, { recursive: true, force: true });
+    fs5.rmSync(sessionDir, { recursive: true, force: true });
     return { removed: true };
   }
   if (!request.force) {
@@ -7621,10 +7665,10 @@ function removeWorkspace(request) {
       return { removed: false, reason: `\u5DE5\u4F5C\u76EE\u5F55\u91CC\u8FD8\u6709${parts.join("\u548C")}` };
     }
   }
-  const repo = path4.dirname(git(worktree, ["rev-parse", "--path-format=absolute", "--git-common-dir"]));
+  const repo = path5.dirname(git(worktree, ["rev-parse", "--path-format=absolute", "--git-common-dir"]));
   const branch = git(worktree, ["rev-parse", "--abbrev-ref", "HEAD"]);
   git(repo, ["worktree", "remove", "--force", worktree]);
-  fs4.rmSync(sessionDir, { recursive: true, force: true });
+  fs5.rmSync(sessionDir, { recursive: true, force: true });
   if (branch.startsWith("rw/")) {
     try {
       git(repo, ["branch", "-D", branch]);
@@ -7661,16 +7705,16 @@ function prep(masterId) {
     return 2;
   }
   let base = process.env.XDG_RUNTIME_DIR;
-  if (!base || !fs5.existsSync(base)) base = `/tmp/agent-remote-worker-${os5.userInfo().uid}`;
-  const dir = path5.join(base, "agent-remote-worker");
-  fs5.mkdirSync(dir, { recursive: true, mode: 448 });
-  const owner = fs5.lstatSync(dir);
-  if (!owner.isDirectory() || owner.uid !== os5.userInfo().uid || (owner.mode & 63) !== 0) {
+  if (!base || !fs6.existsSync(base)) base = `/tmp/agent-remote-worker-${os6.userInfo().uid}`;
+  const dir = path6.join(base, "agent-remote-worker");
+  fs6.mkdirSync(dir, { recursive: true, mode: 448 });
+  const owner = fs6.lstatSync(dir);
+  if (!owner.isDirectory() || owner.uid !== os6.userInfo().uid || (owner.mode & 63) !== 0) {
     console.error(`refusing to use ${dir}: not a private directory of this user`);
     return 4;
   }
-  const socket = path5.join(dir, `master-${id}.sock`);
-  fs5.rmSync(socket, { force: true });
+  const socket = path6.join(dir, `master-${id}.sock`);
+  fs6.rmSync(socket, { force: true });
   const result = {
     socket,
     script: fileURLToPath(import.meta.url),
@@ -7738,8 +7782,9 @@ function questionOutput(request, answer2, fallback) {
   };
 }
 async function hookRequest(kind, args2) {
-  const [socket = "", worker = "worker", session = "?", timeoutArg, approvalArg] = args2;
+  const [launchSocket = "", worker = "worker", session = "?", timeoutArg, approvalArg] = args2;
   const input = JSON.parse(await readStdin());
+  const { socket, master } = currentMaster(session, launchSocket);
   const timeoutMs = Math.max(0, Number(timeoutArg) || 0) * 1e3;
   const dir = requestsDir();
   const request = {
@@ -7753,7 +7798,8 @@ async function hookRequest(kind, args2) {
     approval: approvalArg === "user" ? "user" : "master",
     toolName: String(input.tool_name ?? (kind === "question" ? "AskUserQuestion" : "?")),
     toolInput: input.tool_input ?? {},
-    ...Array.isArray(input.permission_suggestions) ? { suggestions: input.permission_suggestions } : {}
+    ...Array.isArray(input.permission_suggestions) ? { suggestions: input.permission_suggestions } : {},
+    ...master ? { master } : {}
   };
   const output = kind === "permission" ? permissionOutput : questionOutput;
   const cleanUp = () => removeRequest(dir, request.id);
@@ -7776,11 +7822,11 @@ async function hookRequest(kind, args2) {
   console.log(JSON.stringify(output(request, answer2, kind === "permission" ? PERMISSION_TIMED_OUT : QUESTION_TIMED_OUT)));
   return 0;
 }
-async function hookDenied([socket = "", worker = "worker", session = "?"]) {
+async function hookDenied([launchSocket = "", worker = "worker", session = "?"]) {
   try {
     const input = JSON.parse(await readStdin());
     await postToInbox(
-      socket,
+      currentMaster(session, launchSocket).socket,
       autoDeniedMessage(worker, session, String(input.tool_name ?? "?"), input.tool_input ?? {}, String(input.reason ?? ""))
     );
   } catch {
@@ -7788,18 +7834,48 @@ async function hookDenied([socket = "", worker = "worker", session = "?"]) {
   return 0;
 }
 function pending() {
-  console.log(JSON.stringify(listPending(requestsDir())));
+  const dir = routesDir();
+  const requests = listPending(requestsDir()).map((request) => {
+    const { master: _recorded, ...rest } = request;
+    const master = readRoute(dir, request.session)?.master;
+    return master ? { ...rest, master } : rest;
+  });
+  console.log(JSON.stringify(requests));
   return 0;
 }
-async function answer(id) {
+async function answer(id, masterId) {
   try {
-    const request = answerRequest(requestsDir(), id ?? "", JSON.parse(await readStdin()));
+    const request = answerRequest(requestsDir(), id ?? "", JSON.parse(await readStdin()), (found) => {
+      const owner = readRoute(routesDir(), found.session)?.master;
+      if (masterId && owner && owner !== masterId) {
+        throw new RequestError(
+          `\u8BF7\u6C42 #${found.id} \u5C5E\u4E8E\u53E6\u4E00\u4E2A\u4E3B\u4F1A\u8BDD\u6D3E\u53D1\u7684\u4F1A\u8BDD\u300C${found.session}\u300D\uFF0C\u6CA1\u6709\u7B54\u590D\u3002\u90A3\u4E2A\u4E3B\u4F1A\u8BDD\u4F1A\u6536\u5230\u5E76\u5904\u7406\u5B83\u3002\u786E\u5B9E\u8981\u7531\u4F60\u63A5\u7BA1\u8FD9\u4E2A\u4F1A\u8BDD\uFF0C\u5148\u7528 worker_send \u7ED9\u5B83\u53D1\u4E00\u6761\u6D88\u606F\uFF08\u4E4B\u540E\u5B83\u7684\u6C47\u62A5\u548C\u8BF7\u6C42\u90FD\u4F1A\u4EA4\u7ED9\u4F60\uFF09\uFF0C\u518D\u7B54\u590D\u3002`
+        );
+      }
+    });
     console.log(JSON.stringify(request));
     return 0;
   } catch (error2) {
     console.error(error2 instanceof RequestError ? error2.message : String(error2));
     return 5;
   }
+}
+async function route(session) {
+  try {
+    console.log(JSON.stringify(writeRoute(routesDir(), session ?? "", JSON.parse(await readStdin()))));
+    return 0;
+  } catch (error2) {
+    console.error(String(error2));
+    return 5;
+  }
+}
+function routeShow(session) {
+  console.log(JSON.stringify(readRoute(routesDir(), session ?? "") ?? null));
+  return 0;
+}
+function unroute(session) {
+  removeRoute(routesDir(), session ?? "");
+  return 0;
 }
 async function runCli(command2, args2) {
   switch (command2) {
@@ -7816,7 +7892,13 @@ async function runCli(command2, args2) {
     case "pending":
       return pending();
     case "answer":
-      return answer(args2[0]);
+      return answer(args2[0], args2[1]);
+    case "route":
+      return route(args2[0]);
+    case "route-show":
+      return routeShow(args2[0]);
+    case "unroute":
+      return unroute(args2[0]);
     case "post":
       return post(args2[0]);
     case "prep":
@@ -7826,7 +7908,7 @@ async function runCli(command2, args2) {
     case "trust-root":
       return trustRoot(args2[0]);
     default:
-      console.error("usage: worker.js serve | post <pid> | prep <master-id> | trust <dir> | pending | answer <id>");
+      console.error("usage: worker.js serve | post <pid> | prep <master-id> | trust <dir> | pending | answer <id> [master-id] | route <session> | route-show <session> | unroute <session>");
       return 2;
   }
 }
@@ -8309,8 +8391,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path6, errorMaps, issueData } = params;
-  const fullPath = [...path6, ...issueData.path || []];
+  const { data, path: path7, errorMaps, issueData } = params;
+  const fullPath = [...path7, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -8426,11 +8508,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path6, key) {
+  constructor(parent, value, path7, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path6;
+    this._path = path7;
     this._key = key;
   }
   get path() {
@@ -12067,10 +12149,10 @@ function assignProp(target, prop, value) {
     configurable: true
   });
 }
-function getElementAtPath(obj, path6) {
-  if (!path6)
+function getElementAtPath(obj, path7) {
+  if (!path7)
     return obj;
-  return path6.reduce((acc, key) => acc?.[key], obj);
+  return path7.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -12390,11 +12472,11 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path6, issues) {
+function prefixIssues(path7, issues) {
   return issues.map((iss) => {
     var _a;
     (_a = iss).path ?? (_a.path = []);
-    iss.path.unshift(path6);
+    iss.path.unshift(path7);
     return iss;
   });
 }
@@ -15805,11 +15887,11 @@ function normalizeObjectSchema(schema) {
   }
   return void 0;
 }
-function getDotPath(path6) {
-  if (path6.length === 0) {
+function getDotPath(path7) {
+  if (path7.length === 0) {
     return "object root";
   }
-  return path6.reduce((acc, seg, index) => {
+  return path7.reduce((acc, seg, index) => {
     if (index === 0) {
       return String(seg);
     }
@@ -22163,7 +22245,7 @@ async function serveWorker() {
   const deliver = async (kind, body) => {
     if (!body.trim()) throw new ToolError("\u6D88\u606F\u5185\u5BB9\u4E3A\u7A7A\u3002");
     try {
-      await postToInbox(masterSocket, workerMessage(worker, session, kind, body));
+      await postToInbox(currentMaster(session, masterSocket).socket, workerMessage(worker, session, kind, body));
     } catch (error2) {
       throw new ToolError(
         `\u672A\u9001\u8FBE\uFF1A\u4E3B\u8282\u70B9\u5F53\u524D\u4E0D\u5728\u7EBF\uFF08${errorText(error2, 80)}\uFF09\u3002\u53EF\u4EE5\u7A0D\u540E\u91CD\u8BD5\uFF0C\u6216\u5148\u7EE7\u7EED\u5DE5\u4F5C\uFF0C\u4E3B\u8282\u70B9\u91CD\u8FDE\u540E\u4F1A\u8BA9\u4F60\u91CD\u65B0\u6C47\u62A5\u3002`
