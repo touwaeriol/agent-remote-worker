@@ -182,6 +182,26 @@ test("the hooks hold the session until the master answers through the CLI", { ti
   }
 });
 
+test("an auto-mode refusal is reported to the master and left standing", async () => {
+  const socket = path.join(tmp, "denied.sock");
+  const inbox = await fakeInbox(socket);
+  try {
+    const result = await runWorker(
+      ["hook-denied", socket, "box", "cw-1"],
+      JSON.stringify({ tool_name: "Bash", tool_input: { command: "rm -rf /tmp/build" }, reason: "[Irreversible Local Destruction]" }),
+      {},
+    );
+    assert.equal(result.stdout.trim(), ""); // no retry, no decision
+    const text = await inbox.next();
+    assert.match(text, /被 auto 模式直接拒绝了/);
+    assert.match(text, /命令：rm -rf \/tmp\/build\n原因：\[Irreversible Local Destruction\]/);
+  } finally {
+    inbox.close();
+  }
+  const offline = await runWorker(["hook-denied", path.join(tmp, "nobody.sock"), "box", "cw-1"], "{}", {});
+  assert.equal(offline.code, 0);
+});
+
 test("with the master unreachable the hooks refuse at once", async () => {
   const env = { CW_REQUESTS_DIR: path.join(tmp, "offline") as string };
   const args = [path.join(tmp, "nobody.sock"), "box", "cw-1", "60", "master"];

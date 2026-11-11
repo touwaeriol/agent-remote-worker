@@ -7,6 +7,7 @@ import { postToInbox, sessionInbox } from "../shared/inbox.ts";
 import {
   PERMISSION_NOT_FORWARDED,
   PERMISSION_TIMED_OUT,
+  autoDeniedMessage,
   QUESTION_NOT_FORWARDED,
   QUESTION_TIMED_OUT,
   permissionDenied,
@@ -202,6 +203,23 @@ async function hookRequest(kind: "permission" | "question", args: string[]): Pro
   return 0;
 }
 
+/**
+ * hook-denied <socket> <worker> <session>: a PermissionDenied hook. Auto mode
+ * refused a call without asking anyone; tell the master. The refusal stands.
+ */
+async function hookDenied([socket = "", worker = "worker", session = "?"]: string[]): Promise<number> {
+  try {
+    const input = JSON.parse(await readStdin());
+    await postToInbox(
+      socket,
+      autoDeniedMessage(worker, session, String(input.tool_name ?? "?"), (input.tool_input ?? {}) as Record<string, unknown>, String(input.reason ?? "")),
+    );
+  } catch {
+    // The master is out of reach: the worker still sees the refusal and can report it later.
+  }
+  return 0;
+}
+
 /** pending: the requests on this machine still waiting for the master, as JSON. */
 function pending(): number {
   console.log(JSON.stringify(listPending(requestsDir())));
@@ -228,6 +246,8 @@ export async function runCli(command: string | undefined, args: string[]): Promi
       return workspace("remove");
     case "hook-ask":
       return hookRequest("question", args);
+    case "hook-denied":
+      return hookDenied(args);
     case "hook-permission":
       return hookRequest("permission", args);
     case "pending":

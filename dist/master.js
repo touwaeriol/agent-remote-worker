@@ -22233,7 +22233,20 @@ var WorkerNode = class {
       // Nobody sits at a worker session: its permission prompts and questions go to the master instead.
       hooks: {
         PreToolUse: [{ matcher: "AskUserQuestion", hooks: [hook("hook-ask")] }],
-        PermissionRequest: [{ matcher: "*", hooks: [hook("hook-permission")] }]
+        PermissionRequest: [{ matcher: "*", hooks: [hook("hook-permission")] }],
+        // Auto mode refuses some calls without a prompt; at least let the master know.
+        PermissionDenied: [
+          {
+            matcher: "*",
+            hooks: [
+              {
+                type: "command",
+                command: [options.channel.node, options.channel.script, "hook-denied", env.CW_MASTER_SOCK, env.CW_WORKER, env.CW_SESSION].map(shq).join(" "),
+                timeout: 30
+              }
+            ]
+          }
+        ]
       },
       // A session that bypasses permission prompts holds peer messages unless told to accept them.
       ...options.permissionMode === "bypassPermissions" ? { crossSessionInbound: "accept" } : {}

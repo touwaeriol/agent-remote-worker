@@ -43,6 +43,17 @@ export function workerMessage(worker: string, session: string, kind: ReportKind,
   );
 }
 
+/** What the master reads when auto mode refused one of the worker's tool calls on its own. */
+export function autoDeniedMessage(worker: string, session: string, toolName: string, input: Record<string, unknown>, reason: string): string {
+  return (
+    `${WORKER_PREFIX} worker「${worker}」会话「${session}」的一个操作被 auto 模式直接拒绝了（没有经过你，也无法事后放行）：\n` +
+    `${describeToolCall(toolName, input)}\n原因：${reason || "未说明"}\n\n` +
+    "（worker 会自己换做法或向你汇报。需要给它指示用 " +
+    `worker_send(worker="${worker}", session="${session}", message=...)；` +
+    "确实需要这个操作时，告诉用户，用户同意后用 worker_stop 再以 permission_mode=\"default\" 执行 worker_resume，之后这类操作会交给你批准。）"
+  );
+}
+
 export function masterMessage(body: string): string {
   return `${MASTER_PREFIX} ${body.trim()}`;
 }

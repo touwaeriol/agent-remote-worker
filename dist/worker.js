@@ -7323,6 +7323,13 @@ ${body.trim()}
 
 \uFF08\u56DE\u590D\u6216\u8FFD\u52A0\u6307\u4EE4\uFF1Aworker_send(worker="${worker}", session="${session}", message=...)\uFF09`;
 }
+function autoDeniedMessage(worker, session, toolName, input, reason) {
+  return `${WORKER_PREFIX} worker\u300C${worker}\u300D\u4F1A\u8BDD\u300C${session}\u300D\u7684\u4E00\u4E2A\u64CD\u4F5C\u88AB auto \u6A21\u5F0F\u76F4\u63A5\u62D2\u7EDD\u4E86\uFF08\u6CA1\u6709\u7ECF\u8FC7\u4F60\uFF0C\u4E5F\u65E0\u6CD5\u4E8B\u540E\u653E\u884C\uFF09\uFF1A
+${describeToolCall(toolName, input)}
+\u539F\u56E0\uFF1A${reason || "\u672A\u8BF4\u660E"}
+
+\uFF08worker \u4F1A\u81EA\u5DF1\u6362\u505A\u6CD5\u6216\u5411\u4F60\u6C47\u62A5\u3002\u9700\u8981\u7ED9\u5B83\u6307\u793A\u7528 worker_send(worker="${worker}", session="${session}", message=...)\uFF1B\u786E\u5B9E\u9700\u8981\u8FD9\u4E2A\u64CD\u4F5C\u65F6\uFF0C\u544A\u8BC9\u7528\u6237\uFF0C\u7528\u6237\u540C\u610F\u540E\u7528 worker_stop \u518D\u4EE5 permission_mode="default" \u6267\u884C worker_resume\uFF0C\u4E4B\u540E\u8FD9\u7C7B\u64CD\u4F5C\u4F1A\u4EA4\u7ED9\u4F60\u6279\u51C6\u3002\uFF09`;
+}
 function masterMessage(body) {
   return `${MASTER_PREFIX} ${body.trim()}`;
 }
@@ -7769,6 +7776,17 @@ async function hookRequest(kind, args2) {
   console.log(JSON.stringify(output(request, answer2, kind === "permission" ? PERMISSION_TIMED_OUT : QUESTION_TIMED_OUT)));
   return 0;
 }
+async function hookDenied([socket = "", worker = "worker", session = "?"]) {
+  try {
+    const input = JSON.parse(await readStdin());
+    await postToInbox(
+      socket,
+      autoDeniedMessage(worker, session, String(input.tool_name ?? "?"), input.tool_input ?? {}, String(input.reason ?? ""))
+    );
+  } catch {
+  }
+  return 0;
+}
 function pending() {
   console.log(JSON.stringify(listPending(requestsDir())));
   return 0;
@@ -7791,6 +7809,8 @@ async function runCli(command2, args2) {
       return workspace("remove");
     case "hook-ask":
       return hookRequest("question", args2);
+    case "hook-denied":
+      return hookDenied(args2);
     case "hook-permission":
       return hookRequest("permission", args2);
     case "pending":

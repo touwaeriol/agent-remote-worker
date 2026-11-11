@@ -62,6 +62,8 @@ worker 需要确认某个操作，或用 `AskUserQuestion` 提问时，你会收
 
 不要替 worker 在本机执行那个被请求的操作。担心漏了请求时用 `worker_pending` 查看。
 
+收到“被 auto 模式直接拒绝了”的通知时，拒绝已经生效，没有编号，不能用 `worker_answer` 放行。worker 通常会自己换做法；需要指示就用 `worker_send`。确实需要这个操作时，告诉用户，用户同意后用 `worker_stop` 再以 `permission_mode="default"` 执行 `worker_resume`。
+
 worker 用 `ask_master` 发来的开放式问题（消息里没有编号）不会原地等待，用 `worker_send` 回复。
 
 ## 审查和收尾
